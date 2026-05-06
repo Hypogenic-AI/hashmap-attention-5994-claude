@@ -1,0 +1,13 @@
+PDF: papers/hashevict_lsh_kv.pdf
+Total pages: 22
+Pages per chunk: 3
+
+Chunks:
+  hashevict_lsh_kv_chunk_001.pdf: pages 1-3
+  hashevict_lsh_kv_chunk_002.pdf: pages 4-6
+  hashevict_lsh_kv_chunk_003.pdf: pages 7-9
+  hashevict_lsh_kv_chunk_004.pdf: pages 10-12
+  hashevict_lsh_kv_chunk_005.pdf: pages 13-15
+  hashevict_lsh_kv_chunk_006.pdf: pages 16-18
+  hashevict_lsh_kv_chunk_007.pdf: pages 19-21
+  hashevict_lsh_kv_chunk_008.pdf: page 22

@@ -1,0 +1,340 @@
+{
+  "config": {
+    "seq_len": 512,
+    "vocab_size": 100,
+    "n_heads": 4,
+    "d_head": 32,
+    "n_seeds": 3,
+    "budgets": [
+      16,
+      32,
+      64,
+      128,
+      256
+    ],
+    "tau_values": [
+      0.001,
+      0.005,
+      0.01,
+      0.02,
+      0.05
+    ]
+  },
+  "runs": [
+    {
+      "seed": 0,
+      "method": "hma",
+      "tau": 0.001,
+      "mean_budget": 17.46484375,
+      "rel_error": 0.0003133168793283403
+    },
+    {
+      "seed": 0,
+      "method": "hma",
+      "tau": 0.005,
+      "mean_budget": 16.4404296875,
+      "rel_error": 0.00145718886051327
+    },
+    {
+      "seed": 0,
+      "method": "hma",
+      "tau": 0.01,
+      "mean_budget": 16.0712890625,
+      "rel_error": 0.002734679263085127
+    },
+    {
+      "seed": 0,
+      "method": "hma",
+      "tau": 0.02,
+      "mean_budget": 15.66845703125,
+      "rel_error": 0.005261754617094994
+    },
+    {
+      "seed": 0,
+      "method": "hma",
+      "tau": 0.05,
+      "mean_budget": 15.1103515625,
+      "rel_error": 0.013264711946249008
+    },
+    {
+      "seed": 0,
+      "method": "streaming",
+      "budget": 16,
+      "mean_budget": 19.62890625,
+      "rel_error": 1.2936190366744995
+    },
+    {
+      "seed": 0,
+      "method": "random",
+      "budget": 16,
+      "mean_budget": 15.765625,
+      "rel_error": 1.2985457181930542
+    },
+    {
+      "seed": 0,
+      "method": "streaming",
+      "budget": 32,
+      "mean_budget": 34.76953125,
+      "rel_error": 1.148757815361023
+    },
+    {
+      "seed": 0,
+      "method": "random",
+      "budget": 32,
+      "mean_budget": 31.03125,
+      "rel_error": 1.1462143659591675
+    },
+    {
+      "seed": 0,
+      "method": "streaming",
+      "budget": 64,
+      "mean_budget": 63.55078125,
+      "rel_error": 0.9142558574676514
+    },
+    {
+      "seed": 0,
+      "method": "random",
+      "budget": 64,
+      "mean_budget": 60.0625,
+      "rel_error": 0.9164389967918396
+    },
+    {
+      "seed": 0,
+      "method": "streaming",
+      "budget": 128,
+      "mean_budget": 115.11328125,
+      "rel_error": 0.5903412103652954
+    },
+    {
+      "seed": 0,
+      "method": "random",
+      "budget": 128,
+      "mean_budget": 112.125,
+      "rel_error": 0.5863530039787292
+    },
+    {
+      "seed": 0,
+      "method": "streaming",
+      "budget": 256,
+      "mean_budget": 194.23828125,
+      "rel_error": 0.22510604560375214
+    },
+    {
+      "seed": 0,
+      "method": "random",
+      "budget": 256,
+      "mean_budget": 192.25,
+      "rel_error": 0.2277194857597351
+    },
+    {
+      "seed": 1,
+      "method": "hma",
+      "tau": 0.001,
+      "mean_budget": 17.5244140625,
+      "rel_error": 0.00030799509841017425
+    },
+    {
+      "seed": 1,
+      "method": "hma",
+      "tau": 0.005,
+      "mean_budget": 16.5244140625,
+      "rel_error": 0.00140471535269171
+    },
+    {
+      "seed": 1,
+      "method": "hma",
+      "tau": 0.01,
+      "mean_budget": 16.09814453125,
+      "rel_error": 0.0026967579033225775
+    },
+    {
+      "seed": 1,
+      "method": "hma",
+      "tau": 0.02,
+      "mean_budget": 15.6962890625,
+      "rel_error": 0.005267435219138861
+    },
+    {
+      "seed": 1,
+      "method": "hma",
+      "tau": 0.05,
+      "mean_budget": 15.21484375,
+      "rel_error": 0.01336982287466526
+    },
+    {
+      "seed": 1,
+      "method": "streaming",
+      "budget": 16,
+      "mean_budget": 19.62890625,
+      "rel_error": 1.2697653770446777
+    },
+    {
+      "seed": 1,
+      "method": "random",
+      "budget": 16,
+      "mean_budget": 15.765625,
+      "rel_error": 1.3170509338378906
+    },
+    {
+      "seed": 1,
+      "method": "streaming",
+      "budget": 32,
+      "mean_budget": 34.76953125,
+      "rel_error": 1.1132088899612427
+    },
+    {
+      "seed": 1,
+      "method": "random",
+      "budget": 32,
+      "mean_budget": 31.03125,
+      "rel_error": 1.1475132703781128
+    },
+    {
+      "seed": 1,
+      "method": "streaming",
+      "budget": 64,
+      "mean_budget": 63.55078125,
+      "rel_error": 0.9000637531280518
+    },
+    {
+      "seed": 1,
+      "method": "random",
+      "budget": 64,
+      "mean_budget": 60.0625,
+      "rel_error": 0.9122015833854675
+    },
+    {
+      "seed": 1,
+      "method": "streaming",
+      "budget": 128,
+      "mean_budget": 115.11328125,
+      "rel_error": 0.5861623287200928
+    },
+    {
+      "seed": 1,
+      "method": "random",
+      "budget": 128,
+      "mean_budget": 112.125,
+      "rel_error": 0.5978959798812866
+    },
+    {
+      "seed": 1,
+      "method": "streaming",
+      "budget": 256,
+      "mean_budget": 194.23828125,
+      "rel_error": 0.21065182983875275
+    },
+    {
+      "seed": 1,
+      "method": "random",
+      "budget": 256,
+      "mean_budget": 192.25,
+      "rel_error": 0.23149269819259644
+    },
+    {
+      "seed": 2,
+      "method": "hma",
+      "tau": 0.001,
+      "mean_budget": 17.7265625,
+      "rel_error": 0.0003259653167333454
+    },
+    {
+      "seed": 2,
+      "method": "hma",
+      "tau": 0.005,
+      "mean_budget": 16.5458984375,
+      "rel_error": 0.0015109773958101869
+    },
+    {
+      "seed": 2,
+      "method": "hma",
+      "tau": 0.01,
+      "mean_budget": 16.14697265625,
+      "rel_error": 0.0029477239586412907
+    },
+    {
+      "seed": 2,
+      "method": "hma",
+      "tau": 0.02,
+      "mean_budget": 15.71484375,
+      "rel_error": 0.005666649900376797
+    },
+    {
+      "seed": 2,
+      "method": "hma",
+      "tau": 0.05,
+      "mean_budget": 15.20556640625,
+      "rel_error": 0.013555287383496761
+    },
+    {
+      "seed": 2,
+      "method": "streaming",
+      "budget": 16,
+      "mean_budget": 19.62890625,
+      "rel_error": 1.2491114139556885
+    },
+    {
+      "seed": 2,
+      "method": "random",
+      "budget": 16,
+      "mean_budget": 15.765625,
+      "rel_error": 1.3073936700820923
+    },
+    {
+      "seed": 2,
+      "method": "streaming",
+      "budget": 32,
+      "mean_budget": 34.76953125,
+      "rel_error": 1.1092199087142944
+    },
+    {
+      "seed": 2,
+      "method": "random",
+      "budget": 32,
+      "mean_budget": 31.03125,
+      "rel_error": 1.162375569343567
+    },
+    {
+      "seed": 2,
+      "method": "streaming",
+      "budget": 64,
+      "mean_budget": 63.55078125,
+      "rel_error": 0.9057362675666809
+    },
+    {
+      "seed": 2,
+      "method": "random",
+      "budget": 64,
+      "mean_budget": 60.0625,
+      "rel_error": 0.9522709250450134
+    },
+    {
+      "seed": 2,
+      "method": "streaming",
+      "budget": 128,
+      "mean_budget": 115.11328125,
+      "rel_error": 0.5925697088241577
+    },
+    {
+      "seed": 2,
+      "method": "random",
+      "budget": 128,
+      "mean_budget": 112.125,
+      "rel_error": 0.6228303909301758
+    },
+    {
+      "seed": 2,
+      "method": "streaming",
+      "budget": 256,
+      "mean_budget": 194.23828125,
+      "rel_error": 0.20730003714561462
+    },
+    {
+      "seed": 2,
+      "method": "random",
+      "budget": 256,
+      "mean_budget": 192.25,
+      "rel_error": 0.24235104024410248
+    }
+  ]
+}

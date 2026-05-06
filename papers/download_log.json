@@ -1,0 +1,224 @@
+[
+  {
+    "name": "reformer_lsh_attention",
+    "status": "OK",
+    "arxiv_id": "2001.04451",
+    "info": "658515 bytes"
+  },
+  {
+    "name": "magicpig_lsh_sampling",
+    "status": "OK",
+    "arxiv_id": "2410.16179",
+    "info": "1755927 bytes"
+  },
+  {
+    "name": "hashevict_lsh_kv",
+    "status": "OK",
+    "arxiv_id": "2412.16187",
+    "info": "1518434 bytes"
+  },
+  {
+    "name": "retrieval_attention_anns",
+    "status": "OK",
+    "arxiv_id": "2409.10516",
+    "info": "1173679 bytes"
+  },
+  {
+    "name": "quest_query_aware",
+    "status": "OK",
+    "arxiv_id": "2406.10774",
+    "info": "2263609 bytes"
+  },
+  {
+    "name": "sparq_bandwidth",
+    "status": "OK",
+    "arxiv_id": "2312.04985",
+    "info": "2033532 bytes"
+  },
+  {
+    "name": "hyperattention_near_linear",
+    "status": "OK",
+    "arxiv_id": "2310.05869",
+    "info": "859294 bytes"
+  },
+  {
+    "name": "loki_low_rank_keys",
+    "status": "OK",
+    "arxiv_id": "2406.02542",
+    "info": "2454476 bytes"
+  },
+  {
+    "name": "smyrf_asymmetric_clustering",
+    "status": "OK",
+    "arxiv_id": "2010.05315",
+    "info": "5104201 bytes"
+  },
+  {
+    "name": "scatterbrain_sparse_lowrank",
+    "status": "OK",
+    "arxiv_id": "2110.15343",
+    "info": "3277983 bytes"
+  },
+  {
+    "name": "efficient_transformers_survey",
+    "status": "OK",
+    "arxiv_id": "2009.06732",
+    "info": "847824 bytes"
+  },
+  {
+    "name": "flashattention_v1",
+    "status": "OK",
+    "arxiv_id": "2205.14135",
+    "info": "2630825 bytes"
+  },
+  {
+    "name": "flashattention_v2",
+    "status": "OK",
+    "arxiv_id": "2307.08691",
+    "info": "1660578 bytes"
+  },
+  {
+    "name": "h2o_heavy_hitter",
+    "status": "OK",
+    "arxiv_id": "2306.14048",
+    "info": "3482403 bytes"
+  },
+  {
+    "name": "streamingllm_attention_sink",
+    "status": "OK",
+    "arxiv_id": "2309.17453",
+    "info": "16952848 bytes"
+  },
+  {
+    "name": "kivi_kv_quantization",
+    "status": "OK",
+    "arxiv_id": "2402.02750",
+    "info": "2194402 bytes"
+  },
+  {
+    "name": "kvquant_quantization",
+    "status": "OK",
+    "arxiv_id": "2401.18079",
+    "info": "2169830 bytes"
+  },
+  {
+    "name": "longformer_sparse",
+    "status": "OK",
+    "arxiv_id": "2004.05150",
+    "info": "539211 bytes"
+  },
+  {
+    "name": "bigbird_sparse",
+    "status": "OK",
+    "arxiv_id": "2007.14062",
+    "info": "1153823 bytes"
+  },
+  {
+    "name": "performer_kernel_attention",
+    "status": "OK",
+    "arxiv_id": "2009.14794",
+    "info": "5880177 bytes"
+  },
+  {
+    "name": "linear_transformer",
+    "status": "OK",
+    "arxiv_id": "2006.16236",
+    "info": "1728131 bytes"
+  },
+  {
+    "name": "snapkv_kv_compression",
+    "status": "OK",
+    "arxiv_id": "2404.14469",
+    "info": "1066370 bytes"
+  },
+  {
+    "name": "native_sparse_attention",
+    "status": "OK",
+    "arxiv_id": "2502.11089",
+    "info": "1435777 bytes"
+  },
+  {
+    "name": "multipole_attention",
+    "status": "OK",
+    "arxiv_id": "2505.13059",
+    "info": "476596 bytes"
+  },
+  {
+    "name": "kdeformer_kde_attention",
+    "status": "OK",
+    "arxiv_id": "2302.02451",
+    "info": "4543852 bytes"
+  },
+  {
+    "name": "learning_to_hash_sparse",
+    "status": "OK",
+    "arxiv_id": "1611.03274",
+    "info": "218099 bytes"
+  },
+  {
+    "name": "lsh_long_context_nmt",
+    "status": "OK",
+    "arxiv_id": "1702.01806",
+    "info": "79360 bytes"
+  },
+  {
+    "name": "shadowkv_kv_shadows",
+    "status": "OK",
+    "arxiv_id": "2410.21465",
+    "info": "1712244 bytes"
+  },
+  {
+    "name": "less_recurrence_kv",
+    "status": "OK",
+    "arxiv_id": "2402.09398",
+    "info": "14882357 bytes"
+  },
+  {
+    "name": "dynamic_context_pruning",
+    "status": "OK",
+    "arxiv_id": "2305.15805",
+    "info": "3392436 bytes"
+  },
+  {
+    "name": "kvtuner_mixed_precision",
+    "status": "OK",
+    "arxiv_id": "2502.04420",
+    "info": "3249084 bytes"
+  },
+  {
+    "name": "q_hitter_sparse_quantized",
+    "status": "OK",
+    "arxiv_id": "2504.20834",
+    "info": "342869 bytes"
+  },
+  {
+    "name": "ecoformer_binary_attention",
+    "status": "OK",
+    "arxiv_id": "2209.09004",
+    "info": "462281 bytes"
+  },
+  {
+    "name": "transformer_lsh_point",
+    "status": "OK",
+    "arxiv_id": "2402.12535",
+    "info": "4608593 bytes"
+  },
+  {
+    "name": "attention_is_all_you_need",
+    "status": "OK",
+    "arxiv_id": "1706.03762",
+    "info": "2215244 bytes"
+  },
+  {
+    "name": "retro_retrieval_lm",
+    "status": "OK",
+    "arxiv_id": "2112.04426",
+    "info": "1566448 bytes"
+  },
+  {
+    "name": "kmeans_attention_routing",
+    "status": "OK",
+    "arxiv_id": "2003.05997",
+    "info": "727287 bytes"
+  }
+]

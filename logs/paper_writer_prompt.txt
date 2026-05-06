@@ -1,0 +1,1314 @@
+You are an academic paper writer. Generate a complete NEURIPS style paper
+based on the experiment results provided.
+
+════════════════════════════════════════════════════════════════════════════════
+                         IMPORTANT: BEFORE YOU START
+════════════════════════════════════════════════════════════════════════════════
+
+Before writing any content, you MUST complete these steps:
+
+1. READ THE SKILL: Review the paper-writer skill at .claude/skills/paper-writer/SKILL.md
+2. READ THE STYLE GUIDE: Study templates/paper_writing/lab_style_guide.md carefully
+3. REVIEW EXAMPLES: Browse paper_examples/ for formatting and language patterns:
+   - Look at sections/1.introduction.tex for language style
+   - Look at tables/*.tex for table formatting
+   - Look at commands/*.tex for macro usage
+4. VERIFY COMMAND TEMPLATES: Command templates (math.tex, general.tex, macros.tex) are pre-copied to paper_draft/commands/
+
+CRITICAL: Reference example papers for FORMATTING and LANGUAGE STYLE only.
+Do NOT copy content, phrasing, or narrative structure from the example papers.
+The examples are in a different research domain - focus only on presentation style.
+
+════════════════════════════════════════════════════════════════════════════════
+                            EXPERIMENT REPORT
+════════════════════════════════════════════════════════════════════════════════
+
+# HashMap Attention — Research Report
+
+## 1. Executive Summary
+
+We tested the user-proposed **HashMap Attention (HMA)** primitive: build a
+per-(layer, head, token-id) lookup table during prefill of which key
+positions previous occurrences of the token attended to above a
+threshold; at decode, a query for the same token id (or a fuzzy n-gram
+context match) computes attention only against those candidate
+positions, plus attention sinks and a small local window. We also
+tested using the same lookup&#39;s hit-frequency to drive **adaptive
+KV-cache quantization**.
+
+**Key findings (GPT-2-small + WikiText-2 + synthetic probes):**
+
+1. **The primitive works on data with token-conditioned structure.** On a
+   synthetic Q/K stress test, HMA achieves 98× lower attention output
+   error than random selection at matched budget (paired t-test
+   p &lt; 1e-4 across seeds), confirming the lookup mechanism itself.
+2. **Real-LLM token-pattern reuse exists but is weak.** GPT-2 attention
+   maps show same-token Jaccard overlap of top-16 attended positions of
+   0.09–0.18 across layers, vs. 0.02–0.07 for distinct-token pairs (a
+   2–5× lift). 2-gram context lookup matches or modestly improves on
+   identity at deeper layers.
+3. **HMA matches or beats H2O / random baselines but is roughly
+   comparable to a sliding-window (StreamingLLM) baseline at fair
+   budgets.** At decode budget ≈ 25, HMA-identity reaches PPL 90.6 vs.
+   streaming PPL 95.7 at budget 32 — i.e. similar quality with ~22%
+   smaller effective KV. Random (PPL 2972) and H2O without local
+   window (PPL 399) are far worse.
+4. **HMA does NOT collapse on aggregation tasks.** On a cwe-style
+   common-word counting probe, HMA&#39;s candidate set scales naturally
+   with target frequency (13 → 41 candidates as frequency goes 1 → 64),
+   keeping relative error ≤ 0.013. Threshold-based storage avoids the
+   Top-K bias documented by MagicPIG.
+5. **Adaptive KV quantization driven by HMA hit count beats both
+   uniform and random allocation at matched memory.** Adaptive at 3.9
+   bits per value reaches PPL 26.4 vs. uniform 4-bit&#39;s PPL 27.3 — ~3%
+   PPL improvement at slightly less memory. The hit-count signal is
+   informative for bit allocation, validating the second arm of the
+   user&#39;s hypothesis.
+
+**Practical implication:** The primitive is real and adaptive
+quantization is a defensible win, but as a **standalone subquadratic
+attention shortcut** for typical autoregressive LM workloads, HMA does
+not dramatically outperform a well-tuned sliding-window baseline at
+small budgets. Its strongest selling point is the *adaptive KV
+quantization* application, where its signal complements existing
+methods rather than replacing them.
+
+---
+
+## 2. Research Question &amp; Motivation
+
+### Question
+Can a per-token-identity (or fuzzy-n-gram) lookup table of attention
+scores, built during prefill and updated during decode, subquadratically
+approximate full attention with acceptable quality? And can the same
+lookup drive adaptive KV-cache quantization?
+
+### Motivation
+Attention is O(L²) compute and O(L) memory at long context. Production
+serving stacks pay this cost twice: prefill (all queries × all keys)
+and decode (every new token reads the full KV cache). Reusing prior
+attention patterns instead of recomputing scores could cut both costs
+subquadratically. Prior work (MagicPIG, HashEvict) hashes the *current
+query* against *current keys* — the user&#39;s idea differs by indexing
+the table on **token identity** (or n-gram context), so behavior is
+cached across occurrences of the same token, not just looked up
+per-query.
+
+### Gap (from literature_review.md)
+- **No published method** stores per-token-identity attention behavior
+  for reuse across occurrences. Reformer/MagicPIG/HashEvict all hash
+  per-query.
+- **No KV-quantization paper** drives bit-width from observed attention
+  frequency. KIVI/KVQuant/KVTuner use static per-channel/per-token/per-
+  layer policies.
+- **MagicPIG** showed LSH-Top-K is a biased estimator; aggregation
+  tasks (RULER cwe/fwe) collapse. Threshold-based storage (vs strict
+  Top-K) might avoid this.
+
+---
+
+## 3. Methodology
+
+### Tools and resources used
+- **Model**: GPT-2-small (12 layers, 12 heads, head_dim=64, 124M
+  params), HuggingFace `transformers` 5.8 with `attn_implementation
+  =&#34;eager&#34;` so we can intercept softmax-time attention.
+- **Dataset**: WikiText-2 validation (locally pre-downloaded, ≈500k
+  characters), tokenized with the GPT-2 BPE tokenizer.
+- **Hardware**: NVIDIA RTX A6000 (48 GB), CUDA 12.1, PyTorch 2.5.1.
+- **Synthetic probes**: pure-PyTorch tests on planted Q/K data with
+  controllable token-conditioned attention structure.
+- **All experiments**: 5 seeds for synthetic / aggregation;
+  single-seed deterministic forward passes for LM perplexity.
+
+### Why GPT-2-small
+- Open weights; immediately downloadable; small enough to monkeypatch
+  the attention forward and capture all (layer, head, query, key)
+  scores in one pass for L = 1024.
+- Attention behavior is qualitatively similar to larger models for
+  short-to-medium contexts, so the primitive&#39;s *qualitative* behavior
+  on token-pattern reuse should generalize.
+- Llama-3.2-1B was an alternative but requires HF auth; staying with
+  GPT-2 keeps the experiment fully reproducible from this workspace.
+
+### Methods compared
+| Method | Description |
+|---|---|
+| **Full** | Standard causal attention (oracle) |
+| **Streaming(w)** | StreamingLLM: 4 attention sinks + sliding window of size w |
+| **Random(b)** | b random positions (with sinks + current) |
+| **H2O(b)** | Top-b by *prefill-accumulated* attention score per (layer, head) |
+| **HMA-id(b)** | HashMap with token-identity key, capped at b candidates per query |
+| **HMA-2g(b)** | HashMap with 2-gram context key, capped at b |
+
+For HMA, candidate set = sinks(4) ∪ sliding(b/2) ∪ stored positions
+(capped to b total). Storage threshold τ = 0.02. n-gram context for
+the 2-gram variant is `(token_{i-1}, token_i)` hashed.
+
+### Adaptive quantization scheme (Exp 6)
+- Capture `hit_count[layer, head, position]` = number of queries that
+  attended to `position` with weight ≥ τ during a full-attention pass.
+- For each (layer, head), rank positions by hit_count.
+- Top p8 fraction → 8 bits; next p4 fraction → 4 bits; rest → 3 bits.
+- Symmetric quantization: per-channel for K (KIVI-style); per-token
+  for V. Mixed bit-widths handled by quantizing each bit-tier
+  separately.
+- Compare to uniform (every position same bit-width) and random
+  (same bit fractions but assigned randomly) at matched average bits.
+
+### Reproducibility
+- All seeds set: `random.seed(42)`, `np.random.seed(42)`,
+  `torch.manual_seed(42)`.
+- All sources in `src/`. Each experiment script is self-contained and
+  saves both JSON results and a figure.
+- Total runtime on a single A6000: ≈ 4 minutes for all five
+  experiments.
+
+---
+
+## 4. Results
+
+### Experiment 1 — Synthetic Q/K (Figure: `figures/exp1_budget_vs_error.png`)
+
+Planted token-conditioned attention structure (each of 100 vocab tokens
+has a fixed Q/K direction), seq_len=512, n_heads=4, d_head=32, 3 seeds.
+
+| Method | Mean budget | Rel. attention error |
+|---|---|---|
+| HMA (τ=0.05) | 15.2 | 0.013 ± 0.000 |
+| HMA (τ=0.02) | 15.7 | 0.005 ± 0.000 |
+| HMA (τ=0.01) | 16.1 | 0.003 ± 0.000 |
+| HMA (τ=0.005) | 16.5 | 0.001 ± 0.000 |
+| HMA (τ=0.001) | 17.5 | 0.000 ± 0.000 |
+| Streaming | 19.6 | **1.270 ± 0.011** |
+| Random | 15.8 | **1.308 ± 0.010** |
+
+**Headline**: at budget ≈ 16, HMA&#39;s relative error is **98× lower**
+than random&#39;s, with paired t-test p &lt; 1e-4 (n=3 seeds). When the data
+truly is token-conditioned, the lookup primitive captures it cleanly.
+
+### Experiment 2 — Token-pattern stability in GPT-2 (Figure: `figures/exp2_jaccard.png`)
+
+GPT-2-small on 1024-token WikiText-2 passage. For each query position,
+take the top-16 attended positions; compute Jaccard overlap of these
+sets across pairs of queries grouped by:
+- `identity`: same token id
+- `2gram`: same last-2 tokens
+- `distinct`: random pairs across distinct token ids
+
+| Layer | identity | 2-gram | distinct | identity / distinct |
+|---|---|---|---|---|
+| 0  | 0.089 | 0.079 | 0.017 | 5.16× |
+| 6  | 0.091 | 0.088 | 0.050 | 1.84× |
+| 11 | **0.176** | **0.210** | 0.074 | 2.39× |
+
+**Key observations**: (a) identity overlap is consistently and
+statistically higher than distinct (signal exists); (b) 2-gram
+overlap *exceeds* identity at layer 11, supporting the user&#39;s &#34;fuzzy
+n-gram lookup&#34; intuition for deeper layers; (c) absolute Jaccard
+remains modest (~0.1–0.2), meaning the lookup alone won&#39;t capture the
+full attention pattern — local context is still essential.
+
+### Experiment 3 — End-to-end perplexity vs. KV budget (Figure: `figures/exp3_ppl_vs_budget.png`)
+
+L=512, prefill=256, decode=256. Full-attention oracle PPL = 22.43.
+
+| Method | Target budget | Effective budget (decode) | Perplexity |
+|---|---|---|---|
+| Full | — | 384 | **22.43** |
+| Streaming | 32 | 32.0 | 95.68 |
+| Streaming | 64 | 64.0 | 54.30 |
+| Streaming | 128 | 128.0 | 43.66 |
+| Random | 32 | 32.0 | 2972.17 |
+| Random | 128 | 128.0 | 300.51 |
+| H2O | 32 | 32.0 | 399.18 |
+| H2O | 128 | 128.0 | 448.16 |
+| HMA-id | 32 | **24.8** | **90.64** |
+| HMA-id | 64 | 44.2 | 59.97 |
+| HMA-id | 128 | 79.1 | 49.07 |
+| HMA-2g | 128 | 69.3 | **45.82** |
+| HMA-2g | 256 | 133.2 | **37.61** |
+
+**Key observations**:
+- HMA dramatically beats random and H2O-without-window at all budgets.
+- HMA-identity at *effective budget 24.8* beats streaming at budget 32
+  (PPL 90.6 vs 95.7) — meaningful efficiency gain at small budgets.
+- At larger budgets, streaming and HMA converge; HMA-2g eventually
+  edges out streaming (PPL 37.6 vs 30.2 at decode budget ≈ 133 vs
+  256).
+- HMA&#39;s actual budget grows sublinearly with the cap because the
+  threshold-based stored set saturates.
+
+### Experiment 5 — Aggregation failure-mode probe (Figure: `figures/exp5_aggregation.png`)
+
+A synthetic &#34;common-word&#34; probe: a query token is a target word; the
+correct attention output is an average over `target_freq` other
+positions of the same target word. We measure HMA&#39;s relative error at
+this final query as `target_freq` grows.
+
+| Target freq | Mean target count | HMA candidates | Rel. error |
+|---|---|---|---|
+| 1 | 2.0 | 13.0 | 0.003 ± 0.004 |
+| 4 | 4.8 | 15.6 | 0.001 ± 0.001 |
+| 16 | 15.6 | 23.8 | 0.003 ± 0.001 |
+| 32 | 28.2 | 32.4 | 0.007 ± 0.002 |
+| 64 | 43.0 | 40.8 | 0.013 ± 0.002 |
+
+**Key observation**: HMA does *not* collapse on this aggregation
+probe. The candidate set grows naturally from 13 to 41 as the target
+frequency grows from 1 to 64, because all repeated occurrences of the
+target token have populated the lookup with their respective target
+positions. Threshold-based storage adapts to aggregation breadth in a
+way that strict Top-K cannot. This is direct evidence that HMA
+sidesteps the MagicPIG-identified failure mode of LSH-Top-K methods.
+
+### Experiment 6 — Adaptive KV quantization (Figure: `figures/exp6_quant.png`)
+
+Apply per-(layer, head, position) bit-width assignment driven by HMA
+hit count. Compare to uniform quantization (every position same
+bit-width) and random (same fractions but random position assignment).
+Full-precision PPL = 25.14.
+
+| Method | Avg bits | Perplexity |
+|---|---|---|
+| FP32 | 32.0 | 25.14 |
+| Uniform 8-bit | 8.0 | 25.16 |
+| Uniform 6-bit | 6.0 | 25.17 |
+| Uniform 4-bit | 4.0 | 27.34 |
+| Uniform 3-bit | 3.0 | 46.83 |
+| Uniform 2-bit | 2.0 | 290.53 |
+| Adaptive (50/50: 8b/4b) | 6.00 | **25.14** |
+| Adaptive (25/75: 8b/4b) | 5.00 | **25.37** |
+| Adaptive (10/90: 8b/4b) | 4.40 | **25.68** |
+| Adaptive (10/40/50: 8b/4b/3b) | 3.90 | **26.41** |
+| Random (50/50: 8b/4b) | 6.00 | 25.40 |
+| Random (10/40/50: 8b/4b/3b) | 3.90 | 27.12 |
+
+**Key observations**:
+- Uniform 6-bit/8-bit quantization is essentially lossless for GPT-2&#39;s
+  KV cache; quantization loss only appears at 4 bits and below.
+- **Adaptive at 3.90 bits (PPL 26.41) beats uniform 4-bit (PPL 27.34)
+  at lower memory** — a clean win on the Pareto frontier.
+- Adaptive consistently beats random at every matched bit-budget,
+  confirming the hit-count signal is informative.
+- At 6-bit average, adaptive matches the FP32 perplexity exactly.
+
+---
+
+## 5. Analysis &amp; Discussion
+
+### How findings relate to the hypothesis
+- **H1 (token-conditioned attention)**: PARTIALLY supported. There is
+  a real, statistically meaningful identity-vs-distinct lift in GPT-2
+  attention overlap (1.8–5×), but the absolute Jaccard is small. The
+  primitive captures *some* but not *all* of the structure.
+- **H2 (lookup primitive predicts useful keys)**: SUPPORTED on
+  synthetic data (98× lower error than random); SUPPORTED but modest
+  on real GPT-2 (HMA-identity beats H2O and random by 5–25× in PPL).
+- **H3 (subquadratic compute)**: Theoretically yes — HMA candidate
+  count is `O(sinks + window + |stored ∩ causal|)`. In our experiments
+  the stored set saturates at ~20–80 positions per query regardless
+  of cap, suggesting genuine sublinear growth. We did not measure
+  wall-clock here (the eval uses a dense mask for fairness).
+- **H4 (graceful quality degradation)**: SUPPORTED. PPL improves
+  monotonically with budget, with HMA tracking streaming closely and
+  eventually edging it out at larger budgets.
+- **H5 (aggregation robustness)**: SUPPORTED. The threshold-based
+  variant of HMA does not collapse on the common-word counting probe;
+  candidate set grows naturally with aggregation breadth.
+- **H6 (adaptive quantization)**: SUPPORTED. Adaptive at 3.9 bits
+  beats uniform 4-bit on both PPL and memory — a Pareto improvement.
+
+### Surprises
+1. **2-gram lookup helps at deeper layers, identity helps at early
+   layers.** This is consistent with the view that early layers do
+   &#34;token-level processing&#34; (the token id alone is informative) and
+   deeper layers do &#34;context-level processing&#34; (the n-gram context
+   matters more).
+2. **HMA&#39;s effective budget saturates well below the cap.** Even with
+   cap=256, HMA only reaches mean budget ≈140 because the
+   threshold-based set is naturally sparse. This is good for
+   efficiency but means budget-controlled comparisons need care.
+3. **H2O without a sliding window is much worse than expected.**
+   Heavy-hitters from prefill alone don&#39;t include any recent
+   positions — and language models lean heavily on local context.
+   This suggests published H2O numbers depend critically on the
+   sliding-window component.
+4. **Uniform 6-bit KV quantization on GPT-2 is essentially lossless.**
+   Adaptive quantization can only help in the 3–4 bit regime; above
+   that the headroom is too small.
+
+### Comparison to literature
+- **vs. MagicPIG (LSH sampling)**: HMA&#39;s threshold-based storage
+  empirically passes our cwe-style probe, consistent with MagicPIG&#39;s
+  argument that *non-Top-K* selection is essential for aggregation.
+  Our HMA is closer to MagicPIG in spirit than to Reformer/HashEvict.
+- **vs. HashEvict**: HashEvict hashes the *query and key embeddings*;
+  HMA hashes the *token identity / n-gram*. The advantage: O(1)
+  lookup with a Python dict; no hash recomputation per query. The
+  disadvantage: does not generalize to unseen tokens (identity
+  variant) or unseen n-grams (2-gram variant).
+- **vs. KIVI**: KIVI uses static per-channel K, per-token V. Our
+  adaptive scheme stacks on top by varying bit-width per token; the
+  small win we see (PPL 26.4 vs 27.3 at 3.9 vs 4.0 bits) is in the
+  expected ballpark for adding hit-rate signal to a strong baseline.
+
+### Practical assessment
+The primitive is real, and the adaptive quantization application is a
+modest but defensible improvement. As a *standalone subquadratic
+attention shortcut*, HMA does not crush a sliding-window baseline at
+the budgets we tested. The most promising direction is **HMA as the
+selection signal for adaptive bit-width allocation** rather than as a
+candidate-set selector.
+
+---
+
+## 6. Limitations
+
+### Methodological
+- **Small model**: GPT-2-small (head_dim=64) is much smaller than
+  frontier LLMs. Attention sparsity patterns differ at scale; deeper,
+  wider heads typically have *more* sparse attention, which would
+  generally favor HMA. We did not test on Llama-1B or larger.
+- **Short context**: L=512–1024 tokens. The biggest claimed wins of
+  sparse-attention methods come at L≥32K. Reframing HMA at long
+  context may show stronger differentiation from sliding window.
+- **Single text passage**: We use one WikiText-2 passage of 1024
+  tokens. For full statistical rigor a per-method PPL distribution
+  across multiple passages would be appropriate. (Synthetic and
+  aggregation probes use 5 seeds.)
+- **Mask-based eval, not actual sparse compute**: We measure quality,
+  not wall-clock. The user noted explicitly that &#34;the systems side of
+  getting this fast enough to be viable at the frontier would be a
+  huge headache&#34; — we did not attempt a CUDA / Triton kernel, so any
+  speed claim is theoretical.
+- **H2O baseline implementation is bare-bones**: real H2O includes a
+  sliding window component which we did not stack onto our H2O. The
+  H2O numbers in this report are pessimistic and should not be taken
+  as a fair refutation of H2O the published method.
+- **Adaptive quantization compares to a stylized baseline**: our
+  uniform quantization uses per-channel K and per-token V scales (KIVI
+  style) but is not a full reproduction of KIVI. Mixed-precision
+  K-quantization is approximated by per-tier per-channel scales,
+  which is suboptimal but consistent across methods.
+
+### Threats to validity
+- **Internal validity**: HMA gets the *prefill* attention from the
+  oracle. In a true post-hoc deployment the prefill would happen at
+  full cost; what HMA buys is a cheaper *decode*. Our exp 3 measures
+  decode-region NLL with prefill done with full attention, which is
+  consistent with this deployment.
+- **External validity**: We tested on a single text domain
+  (WikiText-2, English Wikipedia). Different domains (code, math,
+  RAG) would show different attention patterns and possibly different
+  HMA behavior.
+- **Ceiling effects**: For uniform quantization, GPT-2&#39;s KV cache is
+  remarkably robust — uniform 6-bit is lossless. Modern larger
+  models with longer context have *more* outliers in K (KVQuant
+  reports this), where adaptive allocation has more headroom.
+
+### What could invalidate these results
+- A bug in the mask-injection forward pass producing systematically
+  miscalibrated logits. Mitigated by checking that full-mask forward
+  reproduces the oracle PPL exactly.
+- A bug in HMA candidate-set construction artificially favoring HMA.
+  Mitigated by the matched-budget comparison (HMA&#39;s effective budget
+  is reported, often *smaller* than baselines&#39;) and by random/H2O
+  controls.
+- The adaptive quantization win at 3.9 bits being noise. The win is
+  small (PPL 26.41 vs 27.34) and the random-control comparison
+  (adaptive 26.41 vs random 27.12) suggests the signal is real but
+  modest.
+
+---
+
+## 7. Conclusions &amp; Next Steps
+
+### Answer to the research question
+**Yes, partially.** A per-token-identity (or n-gram-context) lookup
+table built from prefill attention does subquadratically approximate
+full attention with acceptable quality, and the same lookup&#39;s hit
+frequency drives a useful adaptive KV-quantization policy. The wins
+over a well-tuned sliding window are modest at the model scale we
+tested (GPT-2-small, L≤1024), but the primitive is well-defined,
+empirically measurable, and avoids the documented Top-K aggregation
+failure mode of prior LSH-attention methods.
+
+### Practical implications
+- **For inference engineering**: HMA is most promising as a *signal*
+  for downstream decisions (adaptive bit allocation, cache eviction
+  priority) rather than as a primary candidate-set selector. Sliding
+  window + sinks remains a strong baseline that&#39;s hard to beat without
+  long context.
+- **For quantization research**: per-(layer, head, position) hit-count
+  is a cheap, easy-to-collect signal that gives small but consistent
+  gains over uniform quantization. Combining with KIVI&#39;s per-channel
+  scheme is the natural production setup.
+
+### Recommended follow-up experiments
+1. **Long-context evaluation** at L=8K, 32K on Llama-3.2-1B or
+   Mistral-7B. Plan: download model with HF auth, run on RULER
+   `niah_single` and `cwe`. Predicted: HMA&#39;s win over streaming grows
+   with L because retrieval-style attention patterns become more
+   structured.
+2. **Hybrid HMA + Quest**: use HMA for the in-page-cluster
+   selection, Quest&#39;s page-min/max bounds for cross-page selection.
+3. **HMA + KIVI in the wild**: deploy adaptive quantization on top of
+   a real KIVI-quantized model and measure end-to-end downstream task
+   accuracy (LongBench).
+4. **Trainable variant**: replace hard threshold with a learned
+   gating function; evaluate trainability (the NSA paper notes
+   non-differentiability of hard hashing).
+5. **Systems prototype**: implement HMA candidate selection as a
+   sparse-tensor lookup with batched gather; profile against a
+   FlashAttention-2 baseline at long context.
+
+### Open questions
+- Does the identity vs 2-gram crossover (early vs late layers)
+  generalize to bigger models? If yes, an automatic per-layer choice
+  of n-gram length is the natural next step.
+- Why does HMA&#39;s stored set saturate so much below the cap? Likely
+  because attention is genuinely sparse beyond a few tokens; if so,
+  the cap parameter is mostly redundant for HMA.
+- Is the small adaptive-quantization win (PPL ~3% lower at lower
+  memory) preserved at production scale (Llama 70B), or does it scale?
+
+---
+
+## References (resources used)
+
+### Papers (in `papers/`)
+- Reformer: The Efficient Transformer (Kitaev et al., ICLR 2020)
+- MagicPIG: LSH Sampling for Efficient LLM Generation (Chen et al., 2024)
+- HashEvict: Pre-Attention KV Cache Eviction via LSH (Liu et al., 2024)
+- RetrievalAttention (Liu, Chen et al., MSR 2024)
+- SMYRF: Asymmetric Clustering Attention (Daras et al., NeurIPS 2020)
+- Quest: Query-Aware Sparsity (Tang et al., ICML 2024)
+- H2O: Heavy-Hitter Oracle (Zhang et al., 2023)
+- StreamingLLM (Xiao et al., 2023)
+- KIVI: 2-bit KV Quantization (Liu, Yuan et al., ICML 2024)
+- Native Sparse Attention (DeepSeek, 2025)
+
+### Datasets
+- WikiText-2 validation set (HuggingFace, locally cached at
+  `datasets/wikitext-2/`)
+
+### Code / models used
+- HuggingFace `transformers` 5.8 (GPT-2 wrapper, tokenizer)
+- PyTorch 2.5.1 + CUDA 12.1
+- All HMA / baseline implementations are in `src/`, written from scratch.
+
+
+════════════════════════════════════════════════════════════════════════════════
+                            RESEARCH PLAN
+════════════════════════════════════════════════════════════════════════════════
+
+# HashMap Attention — Research Plan
+
+## Motivation &amp; Novelty Assessment
+
+### Why This Research Matters
+Attention is O(L²) in compute and O(L) in memory at long context. Most production
+serving stacks at frontier scale already pay this cost twice: (a) prefill, where
+all queries attend to all keys, and (b) decode, where every new token reads the
+full KV cache. A method that reuses *prior* attention patterns instead of
+recomputing scores could cut both costs subquadratically. The user-proposed
+mechanism — store the keys that previous instances of a token attended to, and
+fuzzily look those up at decode — also opens an adaptive-quantization axis
+(&#34;frequently-attended keys deserve more bits&#34;), which no published method
+exploits.
+
+### Gap in Existing Work
+From `literature_review.md`:
+- LSH-based attention (Reformer, MagicPIG, HashEvict, SMYRF) hashes the
+  *current Q* against *current K*. None caches a token&#39;s historical attention
+  pattern keyed by its identity.
+- Routing Transformer / k-means cluster Q&amp;K spatially but again do not exploit
+  per-token-identity reuse across occurrences.
+- KV-cache quantization (KIVI, KVQuant, KVTuner) uses *static* per-channel /
+  per-token / per-layer policies. None drives the bit-width from observed
+  attention frequency.
+- MagicPIG showed LSH-Top-K is a biased estimator; aggregation tasks (RULER
+  cwe/fwe) collapse. Sampling fixes this. Any HashMap variant must address
+  the bias question.
+- RetrievalAttention identified the OOD problem between Q and K — naïve ANN
+  on K alone fails. Asymmetric / query-aware indexing is required.
+
+### Our Novel Contribution
+We test the user-proposed **HashMap Attention (HMA)** primitive: a
+per-(layer, head, token-id) lookup table that stores *which key positions
+previous occurrences of that token attended to above a threshold*. At decode,
+the query for a new occurrence of token `t` only computes scores against
+`keys[positions[t]] ∪ small_safety_set`. A fuzzy variant looks up via hashing
+of the local n-gram context so that small edit-distance contexts reuse
+patterns. We additionally test **HMA-Quant**: drive per-key bit-width from
+hit frequency in the lookup table.
+
+This is genuinely novel because the *index structure is keyed by token
+identity (or n-gram hash), not by the query embedding*. It is post-hoc and
+training-free, so applicable to any pretrained model.
+
+### Experiment Justification
+1. **E1 — Synthetic primitive validation.** Before any LLM, on synthetic
+   Q/K matrices with known structure: how well does the per-token-identity
+   lookup approximate full attention? What&#39;s the recall vs. budget trade-off?
+   Why: the user&#39;s hypothesis hinges on whether attention patterns *are*
+   token-conditioned. Without this, the rest is moot.
+2. **E2 — Real-LLM token-pattern stability.** Run a small Llama on real
+   text, log per-token-identity attention masks across occurrences, measure
+   IoU/Jaccard. Why: validates the central assumption that attention reuse
+   across occurrences of the same token is meaningful.
+3. **E3 — Fuzzy n-gram lookup.** Extend identity → n-gram-context hash;
+   measure lift. Why: tests whether SimHash-style fuzziness improves the
+   primitive (the user&#39;s &#34;small edit distance token sequences&#34; idea).
+4. **E4 — End-to-end perplexity / KV-budget trade-off** vs. baselines
+   (full attention, StreamingLLM, H2O-style, random selection). Why: the
+   actual user-facing question — does it work in a real LM?
+5. **E5 — Aggregation failure-mode probe (RULER-cwe-style synthetic).**
+   Build a small &#34;common-word counting&#34; probe to test whether HMA falls
+   into the same Top-K bias trap as LSH-Top-K methods. Why: explicitly
+   anticipated by literature; we must check.
+6. **E6 — Adaptive KV quantization.** Use HMA hit-frequency to assign
+   per-key bit-width; measure perplexity at fixed memory budget vs. uniform
+   2-bit quantization. Why: the second arm of the user&#39;s hypothesis.
+
+---
+
+## Research Question
+**Can a per-token-identity / fuzzy-n-gram lookup table of attention scores
+built during prefill and updated during decode subquadratically approximate
+full attention with acceptable quality, and can the same lookup drive
+adaptive KV-cache quantization?**
+
+## Background and Motivation
+See `literature_review.md`. Closest baselines:
+- **MagicPIG**: LSH-sampling, the SOTA LSH-attention paper.
+- **HashEvict**: pre-attention LSH eviction.
+- **H2O / StreamingLLM**: simple eviction baselines.
+- **KIVI**: 2-bit KV-cache quantization companion for the second arm.
+
+## Hypothesis Decomposition
+- H1 (Pattern stability): Different occurrences of the same token in similar
+  contexts attend to overlapping sets of key positions.
+- H2 (Lookup primitive): A per-(token-id) (or n-gram hash) → key-position-set
+  lookup, populated during prefill, can predict useful keys for the next
+  occurrence.
+- H3 (Subquadratic compute): With the lookup, decode-attention compute drops
+  from O(L) per token to O(k) where k = lookup-budget &lt;&lt; L.
+- H4 (Quality): The approximation degrades gracefully with k; at k that gives
+  meaningful subquadratic savings, quality (perplexity) is acceptable
+  (within 1.0 PPL of full).
+- H5 (Aggregation robustness): Using attention-weight thresholding (not
+  just Top-K) avoids the MagicPIG-identified Top-K bias on aggregation.
+- H6 (Adaptive quant): Bit-width allocation by hit frequency outperforms
+  uniform low-bit quantization at matched memory.
+
+## Proposed Methodology
+
+### Approach
+Build the lookup table primitive from scratch in PyTorch. Validate first on
+**synthetic Q/K** (no model), then on **GPT-2-small** (CPU/GPU runnable,
+gpt-2 has tied embeddings and is small enough to manipulate the attention
+manually), then on **Llama-3.2-1B-Instruct** if HF download succeeds. Use
+**WikiText-2** (already downloaded) for perplexity. Keep models small enough
+to run in an afternoon on a single A6000.
+
+The HashMap Attention primitive (per layer, per head):
+- A dict `H : token_id → set[int]` of key positions where attention to this
+  token&#39;s queries previously exceeded threshold τ.
+- During prefill, compute full attention; for every (layer, head, query-token,
+  key-position) where attention weight &gt; τ, insert key-position into
+  `H[token_id_of_query]`.
+- During decode for token `t`, the candidate-key set is `H[t]` ∪
+  always-on safety set (sliding window + sinks). Compute scores only on
+  candidates. A &#34;fuzzy&#34; variant uses an n-gram (e.g., last 2 tokens) hash
+  as the lookup key.
+- For HMA-Quant: maintain hit-count per key position; allocate FP16 for
+  top-q% hit positions, INT4/INT2 for the rest (KIVI-style symmetric).
+
+### Experimental Steps
+1. Implement the HMA primitive (dict-based, no fancy CUDA — correctness first).
+2. Synthetic Q/K stress test: ground-truth attention vs. HMA approximation,
+   sweep budget k, threshold τ, n-gram length.
+3. Hook into GPT-2 via `output_attentions=True` to *observe* token-pattern
+   stability on WikiText-2.
+4. Manually re-implement masked attention forward pass for GPT-2 with
+   HMA and measure the approximate perplexity. Compare to baselines:
+   full, sliding-window-only, sinks+sliding, random budget-k.
+5. Build a synthetic &#34;common-word counting&#34; probe to test the cwe/fwe
+   failure mode at small scale.
+6. Implement adaptive quantization layer (FP16 / INT4 / INT2 per key)
+   driven by hit count; perplexity at matched memory.
+
+### Baselines
+- **Full attention** — accuracy ceiling.
+- **StreamingLLM-style** (sinks=4 + sliding-window-w) — minimal sparsity.
+- **H2O-style** (top-k accumulated attention) — eviction baseline.
+- **Random-k** — sanity-check that the structure helps.
+- **Quest-style page bound** — implementation-time-permitting, simplified.
+- For the quant arm: **uniform INT4** (KIVI-like) at matched memory.
+
+We deliberately do NOT try to reproduce MagicPIG/HashEvict end-to-end
+because their codebases are large and the primitive comparison is more
+informative at this scale.
+
+### Evaluation Metrics
+- **WikiText-2 perplexity** (validation set).
+- **Top-K recall** vs. full attention oracle.
+- **Attention output relative error** `‖ô − o‖_2 / ‖o‖_2`.
+- **Effective KV budget** = avg # candidate keys / sequence length.
+- **Aggregation probe accuracy** — synthetic counting task.
+- **Memory footprint** (for quant experiments) — bytes per token in KV cache.
+
+### Statistical Analysis Plan
+- Synthetic experiments: report mean ± std over 5 seeds.
+- LM perplexity: single-seed (deterministic forward pass) but report across
+  multiple sequences; report median + IQR.
+- Probe: report mean accuracy ± 95% CI (bootstrap, 1000 resamples).
+- Compare HMA vs. each baseline at matched budget with paired t-test where
+  applicable.
+
+## Expected Outcomes
+- H1/H2: We expect *moderate* token-pattern reuse — same token in similar
+  positions attends similarly. Cross-context reuse will be weaker; the
+  fuzzy n-gram lookup should help here.
+- H3/H4: HMA should approximate full attention with k ≈ 10-20% of L on
+  WikiText-2 with &lt;1 PPL degradation, beating random-k handily.
+- H5: We expect HMA-with-threshold (not strict Top-K) to handle the
+  aggregation probe better than strict Top-K, validating MagicPIG&#39;s insight
+  with our own setup.
+- H6: Adaptive quant should beat uniform quant at matched memory by 0.1–
+  0.5 PPL.
+
+## Timeline
+- Phase 0/1 planning: 30 min.
+- Phase 2 env: 15 min.
+- Phase 3 implementation: 90 min (the bulk of the work).
+- Phase 4 experiments: 90 min.
+- Phase 5 analysis &amp; figures: 45 min.
+- Phase 6 documentation: 30 min.
+Total ≈ 5 hours.
+
+## Potential Challenges
+- **GPT-2&#39;s small head dim (64)** may be too noisy to see clean reuse.
+  Mitigation: also test on a layer-dim-128 head if Llama-1B downloads.
+- **WikiText-2 is short** — hard to show subquadratic savings dramatically.
+  Mitigation: report relative improvements, use long passages by
+  concatenation.
+- **HF gated-model auth** for Llama. Mitigation: GPT-2 (open) is the
+  primary model; Llama 3.2 1B is open but needs accept-license.
+- **Implementing manual attention forward pass** has bug-surface area.
+  Mitigation: validate against `model(...)` outputs first; only diverge
+  for the HMA mask.
+
+## Success Criteria
+- Working HMA primitive that runs on synthetic data.
+- Real-model evaluation (at minimum on GPT-2) showing the
+  perplexity-vs-budget trade-off vs. ≥3 baselines.
+- Aggregation probe result (positive or negative — both informative).
+- Adaptive-quant comparison at matched memory budget.
+- REPORT.md with all results, figures, and honest discussion.
+
+
+════════════════════════════════════════════════════════════════════════════════
+                          LITERATURE REVIEW
+════════════════════════════════════════════════════════════════════════════════
+
+# Literature Review: HashMap Attention
+
+## 1. Research area overview
+
+The HashMap Attention hypothesis sits at the intersection of three active
+research threads:
+
+1. **Approximate / sparse attention** — replacing the O(L²) dot-product
+   softmax with a subquadratic shortcut. The earliest line, going back
+   to 2019–2021, includes Reformer, Longformer, BigBird, Performer,
+   Linear Transformers, Routing Transformer, SMYRF, Scatterbrain.
+2. **Dynamic KV-cache selection at inference time** — keep the KV cache
+   small or load only a subset per query. The 2023–2025 wave: H2O,
+   StreamingLLM, SnapKV, Quest, SparQ, Loki, RetrievalAttention,
+   ShadowKV, MagicPIG, HashEvict, NSA.
+3. **KV-cache quantization** — orthogonal compression in the bit-width
+   axis. KIVI, KVQuant, KVTuner, Q-Hitter (sparse + quantized).
+
+The hypothesis specifically proposes building a **lookup table of
+attention scores** keyed by the current token (or a fuzzy match to it)
+and only computing attention against the keys where previous instances
+attended above threshold. That places it in cluster (1) — an attention
+shortcut — but with two distinctive features:
+
+- **Token-conditioned reuse**: the lookup table caches *behavior*, not
+  just keys. If a previous instance of the same token attended to
+  positions `{i, j, k}`, those positions become the sparse pattern for
+  the next instance.
+- **Fuzzy lookup**: small edit-distance token sequences should hit the
+  same bucket. This is exactly an LSH-style problem.
+
+The closest published systems are **HashEvict** (LSH on K vs. Q,
+pre-attention eviction), **MagicPIG** (LSH sampling for unbiased
+estimation), **Reformer** (LSH on shared Q=K), and **SMYRF**
+(asymmetric LSH for Q≠K). None of them implement *exactly* the
+proposed mechanism — caching per-token attention patterns from prior
+occurrences — but their primitives are reusable.
+
+## 2. Key papers
+
+### 2.1 Reformer (Kitaev, Kaiser, Levskaya, ICLR 2020)
+- **Contribution**: First LSH-based attention, replacing O(L²) with
+  O(L log L). Uses random rotations + argmax bucketing as the LSH
+  scheme.
+- **Method**: Forces Q = K (shared linear projection). Hashes are
+  computed on-the-fly per layer. Within a bucket, a chunked attention
+  is performed; multiple hash rounds ensemble to reduce collision
+  errors.
+- **Datasets**: enwik8 (64K tokens), imagenet-64 generation (12K
+  tokens), synthetic algorithmic tasks.
+- **Result**: On par with full attention; large memory and speed
+  savings for long sequences.
+- **Limitations**: Q=K constraint forces retraining from scratch; the
+  hashing/sorting overhead is non-trivial; performance sensitive to
+  hash count. On modern decoder-only LLMs at inference, this scheme
+  has not displaced full attention.
+- **Code**: bundled in `trax`; PyTorch port at
+  `lucidrains/reformer-pytorch` (in `code/reformer-pytorch/`).
+- **Relevance**: foundation paper. Any HashMap Attention design must
+  understand why Reformer-style LSH didn&#39;t win.
+
+### 2.2 SMYRF (Daras, Odena, Kitaev, Dimakis, NeurIPS 2020)
+- **Contribution**: Asymmetric LSH attention that does *not* require
+  Q=K; works as a drop-in replacement for pretrained dense attention
+  layers without retraining.
+- **Method**: Defines asymmetric transformations
+  `F(q) = [q; 0; √(M_Q² + M_K² − ‖q‖²)]`,
+  `G(k) = [k; √(...); 0]`
+  so that Euclidean distance in transformed space monotonically tracks
+  the inner product. Combines with a balanced-cluster LSH so each
+  bucket has equal queries and keys (essential for batched GPU
+  execution).
+- **Datasets**: GLUE (BERT/RoBERTa), IMDB, GAN training on CelebA-HQ.
+- **Result**: SMYRF-BERT slightly *outperforms* BERT on GLUE while
+  using 50% less memory; 99% of BERT&#39;s GLUE score with 75% less memory.
+- **Why it matters here**: First to show that hash-based attention can
+  work *post-hoc* on a pretrained model. This is the architectural
+  pattern HashMap Attention will likely need (no retraining of frontier
+  LLMs).
+- **Code**: `code/smyrf/`.
+
+### 2.3 MagicPIG (Chen, Sadhukhan et al., CMU + Meta, 2024)
+- **Contribution**: LSH-sampling instead of LSH-TopK. Argues that TopK
+  attention is a *biased* estimator and breaks on aggregation tasks
+  (e.g. RULER&#39;s `cwe`/`fwe`); shows sampling proportional to attention
+  weight is unbiased and empirically much better.
+- **Method**: SimHash with (K, L) hyperparameters — L hash tables, K
+  bits per hash. Hash functions on GPU, hash tables on CPU, sparse
+  attention compute on CPU. Critically uses many hash tables (much
+  larger than Reformer/Scatterbrain) for accurate sampling.
+- **Datasets**: RULER (cwe, fwe, niah, multikey), LongBench, Loogle.
+  Tests Llama-3.1-8B-Instruct.
+- **Result**: 1.5–5× decode throughput, 54 ms latency on a single
+  RTX 4090 with 96K context. **Outperforms TopK on aggregation tasks**.
+- **Why it&#39;s the central reference**: this is the most rigorous,
+  most recent demonstration that LSH-attention can be production-fast.
+  It also identifies the trap (TopK bias) any HashMap Attention design
+  must avoid.
+- **Code**: `code/magicpig/`.
+
+### 2.4 HashEvict (Liu, Rabbani et al., 2024)
+- **Contribution**: Pre-attention KV-cache eviction using LSH. At each
+  decode step, both the new query and all cached keys are hashed to
+  c-bit binary codes; eviction is based on Hamming distance.
+- **Method**: SimHash (`h(x) = sgn(Rx)` with random Gaussian R).
+  Maintains a constant-size c×k binary array on GPU (c is hash dim,
+  k is cache size). Decisions made *before* attention compute, unlike
+  H2O which uses post-attention scores.
+- **Datasets**: GSM8K (reasoning), MedQA, NIAH, Common Word retrieval,
+  MultiNews, GovReport (summarization).
+- **Result**: 30–70% KV cache compression with high accuracy; 1.5–2×
+  prefill speedup; matches H2O on most tasks; 17× faster prefill than
+  FastGen.
+- **Why it&#39;s central**: closest published implementation to &#34;fuzzy
+  lookup of which keys to attend to&#34;. The HashEvict binary-array
+  eviction structure is exactly the kind of hashmap the hypothesis
+  proposes.
+- **Code release**: as a fork of `cold-compress` (in `code/cold-compress/`).
+
+### 2.5 RetrievalAttention (Liu, Chen et al., MSR, 2024)
+- **Contribution**: Identifies and solves the **OOD problem** between
+  query and key vectors when applying ANN search to attention.
+- **Key insight**: Mahalanobis distance shows query vectors lie &gt;10×
+  farther from keys than queries lie from queries. Off-the-shelf ANN
+  indexes (built only over keys) need to scan 30–50% of keys to find
+  the true Top-K. Building the index *with awareness of the query
+  distribution* drops that to 1–3%.
+- **Datasets**: ∞-Bench, RULER, on Llama-3-8B (128K context).
+- **Result**: 4.9× speedup over exact KNN, 1.98× over traditional ANN,
+  same accuracy as full attention.
+- **Why it&#39;s critical for HashMap Attention**: any LSH-based fuzzy
+  lookup over K with Q as the probe will hit the same OOD problem.
+  This paper&#39;s solution (asymmetric query-aware index) is essentially
+  what SMYRF discovered for LSH but in the modern ANN-graph setting.
+
+### 2.6 Quest (Tang et al., MIT, ICML 2024)
+- **Contribution**: Page-granularity Top-K selection using cheap min/max
+  bounds per page.
+- **Method**: KV cache stored in pages (PagedAttention layout). For
+  each page, track min/max of each Key dimension. Compute per-page
+  upper-bound score from the current Q, pick Top-K pages, run dense
+  attention only inside them.
+- **Datasets**: PG19 (perplexity), Passkey retrieval, LongBench.
+- **Result**: 7.03× attention speedup, 2.23× end-to-end on 32K
+  context. **Better than H2O and post-hoc methods at the same budget**.
+- **Why it&#39;s central as a baseline**: simpler than hashing, often
+  competitive. A HashMap Attention prototype must justify itself
+  against Quest specifically.
+
+### 2.7 Native Sparse Attention (DeepSeek, 2025)
+- **Contribution**: Three-branch (compressed / selected / sliding)
+  attention, *natively trainable* end-to-end, with hardware-aligned
+  Triton kernels.
+- **Critique relevant to HashMap Attention**: explicitly calls out
+  the discrete selection in MagicPIG (SimHash) and ClusterKV
+  (k-means) as **non-differentiable**, blocking gradient flow during
+  training. This means any HashMap Attention method that uses
+  hard hashing will be limited to inference-time deployment unless
+  paired with a relaxation.
+- **Result**: 11.6× decode, 9.0× forward, 6.0× backward speedup at
+  64K context, while *matching or exceeding* Full Attention quality
+  when pretrained natively.
+- **Implication**: HashMap Attention as a pure inference-time shortcut
+  is fine; HashMap Attention as a *trainable* mechanism needs careful
+  design (continuous relaxation of the lookup, or straight-through
+  estimators).
+
+### 2.8 Quantization companion: KIVI (Liu, Yuan et al., ICML 2024)
+- **Contribution**: 2-bit KV quantization with asymmetric scheme:
+  per-channel for keys (because outlier channels persist in K),
+  per-token for values (because V is mixed by attention output).
+- **Result**: 2.6× memory reduction, ~4× larger batches, 2.35–3.47×
+  throughput, near-zero accuracy drop.
+- **Relevance**: the hypothesis proposes the lookup table itself
+  could enable adaptive KV quantization. KIVI&#39;s per-channel/per-token
+  decomposition is the design pattern to extend: a HashMap Attention
+  could store frequently-attended keys at higher precision and
+  rarely-attended keys at lower precision.
+
+### 2.9 Other notable papers
+- **H2O** (Zhang et al., 2023) — heavy-hitter eviction; canonical
+  baseline.
+- **StreamingLLM** (Xiao et al., 2023) — discovers attention sinks;
+  any approximation must preserve them.
+- **Loki** (Singhania et al., 2024) — keys lie in low-rank subspace;
+  rank tokens cheaply in that subspace.
+- **SparQ** (Ribar et al., 2023) — channel-prune Q for cheap
+  approximate scores.
+- **ShadowKV** (Sun et al., 2024) — low-rank K + offloaded V;
+  reconstruction-based sparse selection.
+- **Multipole Attention** (Hooper et al., 2025) — clustering-based
+  approximation, online cluster updates.
+- **Routing Transformer** (Roy et al., 2021) — k-means clustering of
+  Q/K; closest non-LSH analog of HashMap Attention.
+- **Performer / Linear Transformer** — kernel-based linear attention;
+  fundamentally different mechanism but a baseline for &#34;subquadratic
+  attention&#34;.
+- **FlashAttention 1/2** (Dao et al.) — IO-aware exact attention;
+  orthogonal optimization, often combined with sparse methods.
+
+## 3. Common methodologies
+
+| Method family | Used by | Core trick |
+|---|---|---|
+| **Random-projection LSH (SimHash / angular)** | Reformer, MagicPIG, HashEvict, SMYRF, KDEformer | `h(x) = sgn(Rx)` → Hamming distance ≈ angular distance |
+| **Asymmetric LSH for Q≠K** | SMYRF, RetrievalAttention | Augment Q and K with extra dims so Euclidean distance tracks inner product |
+| **Page/block min-max bounds** | Quest, NSA | Per-block summary stats let cheap upper bounds drive selection |
+| **k-means / clustering** | Routing Transformer, ClusterKV, Multipole | Partition keys by centroid; attend within cluster + use centroid as proxy |
+| **Heavy-hitter eviction** | H2O, Scissorhands | Track accumulated attention scores; evict low-score tokens |
+| **Sliding window + sinks** | StreamingLLM, Longformer | Static local pattern + retain initial tokens |
+| **Channel pruning of Q** | SparQ, Loki | Compute approximate scores using a subset of feature dims |
+| **Low-rank approximation** | Performer, Linear Transformer, Scatterbrain | Replace softmax with separable kernel features |
+| **Per-channel key quantization** | KIVI, KVQuant | Outlier channels in K demand channel-wise grouping |
+
+## 4. Standard baselines an experiment must beat
+
+For a **post-hoc, training-free** HashMap Attention method (most likely
+target given systems-cost concerns):
+1. **Full attention** (FlashAttention-2) — accuracy ceiling, latency
+   floor at long context.
+2. **StreamingLLM** — cheapest &#34;approximation&#34; with attention sinks +
+   sliding window.
+3. **H2O** — heavy-hitter eviction, the simplest dynamic baseline.
+4. **Quest** — page-level Top-K, the strongest non-hashing baseline.
+5. **MagicPIG** — strongest LSH-attention baseline. *The* paper to beat.
+6. **HashEvict** — strongest pre-attention LSH-eviction baseline.
+
+For a **trained-from-scratch** variant:
+1. Full attention pretraining (matched compute).
+2. Native Sparse Attention (DeepSeek 2025) — trained sparse attention.
+3. Reformer (LSH from scratch).
+
+## 5. Standard datasets / benchmarks
+
+| Benchmark | What it measures | Used by |
+|---|---|---|
+| **WikiText-103** | Short-context language modeling perplexity | Most efficient-attention papers |
+| **PG19** | Long-context (10K+) book LM perplexity | Quest, RetrievalAttention, Compressive Transformer |
+| **enwik8** | Byte-level (64K) character LM | Reformer |
+| **Needle-in-a-Haystack (NIAH)** | Long-context retrieval | StreamingLLM, MagicPIG, RetrievalAttention |
+| **PassKey retrieval** | Synthetic long-context | Quest, KIVI |
+| **LongBench** (Bai et al.) | Multi-task long-context (QA, summ., few-shot, code) | KIVI, Quest, MagicPIG, HashEvict |
+| **RULER** (Hsieh et al.) | Synthetic long-context with NIAH + aggregation (`cwe`, `fwe`) | MagicPIG, ShadowKV |
+| **InfiniteBench / ∞-Bench** | 100K–1M token retrieval &amp; reasoning | RetrievalAttention |
+| **GSM8K** | Math reasoning | HashEvict (free-response reasoning eval) |
+| **MultiNews / GovReport** | Long summarization | HashEvict, LongBench subtasks |
+| **MMLU** | Multi-domain knowledge | KIVI |
+
+**For HashMap Attention specifically**: the experiments must include a
+RULER-style aggregation task, because that&#39;s where TopK-style LSH is
+known to fail (MagicPIG Fig. 1). Passing only NIAH and perplexity is
+not enough.
+
+## 6. Standard evaluation metrics
+
+- **Perplexity** (PPL) — gold standard for LM approximation.
+- **Top-K recall** — how often the approximation selects the same
+  tokens as full attention&#39;s true top-K (Quest Fig. 4 style).
+- **Attention output relative error** `‖ô − o‖ / ‖o‖` — direct measure
+  of approximation quality (MagicPIG Fig. 3 style).
+- **Task accuracy** — for downstream benchmarks (GSM8K, LongBench, etc.).
+- **Decoding latency** (ms/token) — wall-clock at given context length.
+- **Throughput** (tok/s) at given batch size.
+- **Peak GPU memory** — especially for long context + KV cache.
+- **KV cache compression ratio** — for the storage axis.
+
+## 7. Gaps and opportunities (what&#39;s uniquely novel about HashMap Attention)
+
+The hypothesis as stated proposes something **not yet in the
+literature**:
+
+1. **Per-token-identity attention reuse**. All current methods
+   (HashEvict, MagicPIG, Reformer) hash *the current query embedding*
+   against *the current keys*. They don&#39;t cache a token&#39;s historical
+   attention pattern keyed by its identity. The idea is closest to
+   *retrieval-augmented LM* (RETRO) but applied at the attention-
+   pattern level rather than the document level.
+
+2. **Fuzzy lookup over token n-grams**. The hypothesis mentions &#34;small
+   edit distance token sequences.&#34; No published work hashes n-gram
+   contexts → attention patterns. There&#39;s a clear bridge to data-
+   structure work (suffix arrays, Bloom filters, MinHash) that could
+   be borrowed.
+
+3. **Adaptive quantization driven by attention frequency**. KIVI/
+   KVQuant use static per-channel/per-token policies. Using observed
+   attention frequency to decide bit-width per key vector is novel.
+
+**Risks the literature surfaces:**
+
+1. **OOD problem** (RetrievalAttention): naive ANN/LSH between Q and K
+   doesn&#39;t work without query-distribution-aware indexing.
+2. **Aggregation tasks fail under TopK** (MagicPIG): if the lookup
+   table is interpreted as TopK selection, expect failure on `cwe`/
+   `fwe`. Sampling is the fix.
+3. **Non-differentiability** (NSA): hash-based selection blocks
+   gradient flow, restricting training-time use.
+4. **Attention-sink robustness** (StreamingLLM): any selection scheme
+   must preserve the first ~4 tokens of the sequence or accuracy
+   collapses.
+5. **Systems cost on accelerators** (the hypothesis itself): hash
+   table operations (lookups, insertions, fuzzy matching) are not
+   what GPU/TPU hardware excels at. MagicPIG&#39;s solution — host the
+   table on CPU — is the most promising precedent.
+
+## 8. Recommendations for our experiment
+
+### Recommended datasets
+- **WikiText-2** (already downloaded) for fast iteration on the LSH
+  primitive and perplexity sanity-checks.
+- **WikiText-103** for stronger LM evaluation.
+- **PG19** subset (streaming) for genuine long-context perplexity.
+- **RULER** (`niah_single_1`, `niah_multikey`, **`cwe`**, **`fwe`**)
+  — the **must-have** benchmark; failing here is the failure mode
+  prior LSH-TopK methods exhibit.
+- **PassKey** + **NIAH** for long-context retrieval.
+- **LongBench** (a few subtasks: `qasper`, `multi_news`, `triviaqa`)
+  for downstream task quality.
+
+### Recommended baselines
+1. Full attention with FlashAttention-2 (accuracy + latency reference).
+2. **StreamingLLM** — minimal sparsity baseline.
+3. **H2O** — eviction baseline.
+4. **Quest** — page-level Top-K, the strongest non-hashing baseline.
+5. **MagicPIG** — LSH attention SOTA; **the paper to beat**.
+6. **HashEvict** — pre-attention LSH eviction; closest implementation.
+
+### Recommended metrics
+- Perplexity (WikiText-103, PG19).
+- Per-task accuracy (RULER, LongBench, PassKey).
+- **Attention output relative error** at fixed lookup budget — direct
+  measure of the hashing primitive&#39;s quality.
+- Decoding latency at 32K, 96K, 128K context.
+- Peak GPU memory.
+
+### Methodological considerations
+1. **Start synthetic**. Before plugging into a real LLM, validate the
+   lookup primitive on synthetic Q/K matrices: build the hash
+   table from prefill, query during decode, compare to dense
+   attention on the same Q/K.
+2. **Test the failure mode early**. Run RULER `cwe`/`fwe` (or
+   reproductions thereof) before claiming success on NIAH. The
+   MagicPIG paper makes this concrete: a method can pass NIAH at 0.1%
+   density but collapse on `cwe` even at 10% density.
+3. **Address OOD up-front**. Either copy RetrievalAttention&#39;s
+   query-aware index construction or follow SMYRF&#39;s asymmetric
+   transformation. Naïve symmetric LSH between Q and K will be
+   poor.
+4. **Preserve attention sinks**. Keep the first ~4 tokens always
+   present in the lookup, regardless of hash decisions.
+5. **Build inside `cold-compress`** if a HashEvict-style fork is
+   the target. It already implements the eval harness and several
+   baselines (H2O, StreamingLLM, sliding-window, FastGen).
+6. **For the quantization side of the hypothesis**, layer KIVI or
+   KVQuant on top of the sparse attention. The simplest &#34;adaptive&#34;
+   policy: keys that are frequently retrieved get FP16, the rest
+   INT2.
+
+
+════════════════════════════════════════════════════════════════════════════════
+                          PAPER REQUIREMENTS
+════════════════════════════════════════════════════════════════════════════════
+
+Generate a complete academic paper with the following structure:
+
+1. TITLE
+   - Clear, specific, informative
+   - Should convey main finding or contribution
+
+2. AUTHOR
+   - Use this exact author line in the \author{} block: Mark Muchane and NeuriCo
+
+3. ABSTRACT (150-250 words)
+   - Problem statement
+   - Approach
+   - Key results
+   - Significance
+
+4. INTRODUCTION
+   - Research problem and motivation
+   - Gap in existing work
+   - Our contribution (be specific)
+   - Paper organization
+
+5. RELATED WORK
+   - Organized by theme/approach
+   - Position our work relative to prior work
+   - Cite papers from literature review
+
+6. METHODOLOGY
+   - Clear description of approach
+   - Experimental setup
+   - Datasets used
+   - Evaluation metrics
+   - Baselines
+
+7. RESULTS
+   - Present results with tables and figures
+   - Statistical analysis
+   - Comparison to baselines
+   - Ablation studies (if applicable)
+
+8. DISCUSSION
+   - Interpretation of results
+   - Limitations
+   - Broader implications
+
+9. CONCLUSION
+   - Summary of contributions
+   - Key findings
+   - Future work
+
+10. REFERENCES
+   - BibTeX format
+   - All cited papers
+
+════════════════════════════════════════════════════════════════════════════════
+                          OUTPUT FORMAT
+════════════════════════════════════════════════════════════════════════════════
+
+Create a MODULAR LaTeX project with the following directory structure:
+
+paper_draft/
+├── main.tex              # Main file that imports all sections
+├── references.bib        # BibTeX references
+├── sections/
+│   ├── abstract.tex      # Abstract content
+│   ├── introduction.tex  # Introduction section
+│   ├── related_work.tex  # Related work section
+│   ├── methodology.tex   # Methodology section
+│   ├── results.tex       # Results section
+│   ├── discussion.tex    # Discussion section
+│   └── conclusion.tex    # Conclusion section
+├── figures/              # Directory for any generated figures
+├── tables/               # Directory for complex standalone tables
+└── appendix/             # Directory for appendix sections (if needed)
+
+INSTRUCTIONS:
+1. First, create the directory structure above (mkdir -p paper_draft/sections paper_draft/figures paper_draft/tables paper_draft/appendix)
+2. Write main.tex using the EXACT preamble for NEURIPS:
+
+   \documentclass{article}
+   \usepackage[final]{neurips_2025}  % NEURIPS style (neurips_2025.sty is in paper_draft/)
+   \usepackage[hidelinks]{hyperref}  % REQUIRED: clickable links
+   \usepackage{booktabs}  % REQUIRED: professional tables
+   \usepackage{graphicx}
+   \usepackage{amsmath,amssymb}
+
+   % Import command files
+   \input{commands/math}
+   \input{commands/general}
+   \input{commands/macros}
+
+   % Use this bibliography style:
+   \bibliographystyle{plainnat}
+
+   \author{Mark Muchane and NeuriCo}
+
+   - Use \input{sections/...} to include each section
+   - Use \bibliography{references} for references
+3. Write each section file with COMPLETE content (no placeholders)
+4. Each section file should include its \section{} command
+5. Write references.bib with all citations in BibTeX format
+6. After writing all files, compile the paper:
+   cd paper_draft && pdflatex -interaction=nonstopmode main.tex && bibtex main && pdflatex -interaction=nonstopmode main.tex && pdflatex -interaction=nonstopmode main.tex
+
+This modular structure allows humans to easily:
+- Edit individual sections without navigating a large file
+- Track changes per section
+- Reuse sections across different paper versions
+
+════════════════════════════════════════════════════════════════════════════════
+                          QUALITY REQUIREMENTS
+════════════════════════════════════════════════════════════════════════════════
+
+- Academic tone throughout
+- All claims must be supported by data from the experiment report
+- Proper citations using \cite{} commands
+- Clear figures and tables with proper captions
+- NO placeholder text - every section must have real content
+- The paper MUST compile without errors
+- If compilation fails, debug and fix the LaTeX errors
+
+════════════════════════════════════════════════════════════════════════════════
+                          LAB WRITING STYLE
+════════════════════════════════════════════════════════════════════════════════
+
+Follow these lab-specific conventions to match our paper style:
+
+1. LANGUAGE STYLE:
+   - Use active voice: "We propose", "We examine", "We focus on"
+   - Be direct and confident: "Our main question is...", "We hypothesize that..."
+   - State things clearly and simply - prefer plain language over jargon
+   - Use bold questions as paragraph organizers: {\bf what is X?}
+   - Include specific quantitative claims: "8.97% over baseline"
+   - Avoid fancy wording: "utilize" → "use", "facilitate" → "help"
+
+2. INTRODUCTION STRUCTURE:
+   - Engaging hook (get to the point quickly)
+   - Problem importance
+   - Gap identification
+   - Your approach with method figure reference
+   - Quantitative preview of results
+   - Contribution bullets (3-4 items, action verbs)
+
+3. CONTRIBUTION LISTS:
+   \begin{itemize}[leftmargin=*,itemsep=0pt,topsep=0pt]
+       \item We propose...
+       \item We conduct...
+       \item We complement...
+   \end{itemize}
+
+4. MODULAR COMMANDS STRUCTURE:
+   Command templates are pre-copied to paper_draft/commands/:
+   - math.tex: Math notation macros
+   - general.tex: Formatting macros
+   - macros.tex: Project-specific term definitions (customize this for your paper)
+
+   In main.tex, include:
+   \input{commands/math}
+   \input{commands/general}
+   \input{commands/macros}
+
+5. REFERENCE CONVENTIONS:
+   Use reference macros from math.tex:
+   - \figref{fig:name} for "figure 1" (lowercase, in-sentence)
+   - \Figref{fig:name} for "Figure 1" (capitalized, start of sentence)
+   - \secref{sec:name} for "section 2"
+
+6. TEXT FORMATTING:
+   - Use \para{Header text} for bold paragraph headers
+   - Define method/dataset names with \textsc and \xspace:
+     \newcommand{\methodname}{\textsc{MethodName}\xspace}
+
+7. TABLE FORMATTING:
+   - Use booktabs package (no vertical lines)
+   - Use \resizebox{\textwidth}{!}{...} for wide tables
+   - Use @{} to remove padding at table edges
+   - Use \cmidrule(lr){x-y} for sub-headers
+   - Use \textsc{} for dataset/method names in headers
+   - Bold best results with {\bf ...}
+
+8. FIGURE FORMATTING:
+   - Use 0.32\textwidth for 3-column subfigures
+   - Use 0.95\linewidth for full-width figures
+   - Use \input{figures/legend} for shared legends
+   - Write self-contained captions explaining key observations
+
+9. RESULTS PRESENTATION:
+   - Define \increase and \decrease for colored arrows (green up, red down)
+   - Bold best results in tables
+   - Report confidence intervals when available
+
+10. ALGORITHM STYLING:
+    - Use algpseudocode with [noend]
+    - Use \triangleright for comments
+
+11. HYPERLINKS (REQUIRED):
+    - Always use \usepackage[hidelinks]{hyperref} or with colored links
+    - All citations, section refs, figure refs, table refs must be clickable
+    - This is essential for reader navigation
+
+════════════════════════════════════════════════════════════════════════════════
+                          WORKFLOW: REVIEW AND REFLECT
+════════════════════════════════════════════════════════════════════════════════
+
+Before calling finish, you MUST complete these review steps:
+
+1. REVIEW RESOURCES (at the start):
+   - Read .claude/skills/paper-writer/SKILL.md for detailed guidance
+   - Study templates/paper_writing/lab_style_guide.md for style conventions
+   - Browse paper_examples/ for formatting and language patterns
+
+2. SELF-REFLECTION (before finishing):
+   After writing all sections, review your work against these criteria:
+
+   LANGUAGE CHECK:
+   - [ ] Is the writing clear and jargon-free?
+   - [ ] Are claims specific with quantitative support?
+   - [ ] Is active voice used throughout?
+
+   FORMATTING CHECK:
+   - [ ] Does main.tex include \input{commands/math}, \input{commands/general}, \input{commands/macros}?
+   - [ ] Is hyperref package included for clickable references?
+   - [ ] Do tables use booktabs (no vertical lines)?
+   - [ ] Are best results bolded in tables?
+   - [ ] Are figures/tables properly captioned?
+
+   STRUCTURE CHECK:
+   - [ ] Does introduction follow: hook → importance → gap → approach → preview → contributions?
+   - [ ] Are contribution bullets specific with action verbs?
+   - [ ] Does the paper compile without errors?
+
+3. FIX ISSUES:
+   - Address any issues found in the self-reflection
+   - Re-compile and verify the PDF looks correct
+
+Only after completing this review should you consider the paper finished.

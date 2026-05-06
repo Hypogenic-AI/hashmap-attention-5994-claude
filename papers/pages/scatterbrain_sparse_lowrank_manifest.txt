@@ -1,0 +1,14 @@
+PDF: papers/scatterbrain_sparse_lowrank.pdf
+Total pages: 34
+Pages per chunk: 4
+
+Chunks:
+  scatterbrain_sparse_lowrank_chunk_001.pdf: pages 1-4
+  scatterbrain_sparse_lowrank_chunk_002.pdf: pages 5-8
+  scatterbrain_sparse_lowrank_chunk_003.pdf: pages 9-12
+  scatterbrain_sparse_lowrank_chunk_004.pdf: pages 13-16
+  scatterbrain_sparse_lowrank_chunk_005.pdf: pages 17-20
+  scatterbrain_sparse_lowrank_chunk_006.pdf: pages 21-24
+  scatterbrain_sparse_lowrank_chunk_007.pdf: pages 25-28
+  scatterbrain_sparse_lowrank_chunk_008.pdf: pages 29-32
+  scatterbrain_sparse_lowrank_chunk_009.pdf: pages 33-34

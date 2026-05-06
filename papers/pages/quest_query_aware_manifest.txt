@@ -1,0 +1,9 @@
+PDF: papers/quest_query_aware.pdf
+Total pages: 11
+Pages per chunk: 3
+
+Chunks:
+  quest_query_aware_chunk_001.pdf: pages 1-3
+  quest_query_aware_chunk_002.pdf: pages 4-6
+  quest_query_aware_chunk_003.pdf: pages 7-9
+  quest_query_aware_chunk_004.pdf: pages 10-11

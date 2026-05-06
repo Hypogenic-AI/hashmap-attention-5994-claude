@@ -1,0 +1,12 @@
+PDF: papers/native_sparse_attention.pdf
+Total pages: 25
+Pages per chunk: 4
+
+Chunks:
+  native_sparse_attention_chunk_001.pdf: pages 1-4
+  native_sparse_attention_chunk_002.pdf: pages 5-8
+  native_sparse_attention_chunk_003.pdf: pages 9-12
+  native_sparse_attention_chunk_004.pdf: pages 13-16
+  native_sparse_attention_chunk_005.pdf: pages 17-20
+  native_sparse_attention_chunk_006.pdf: pages 21-24
+  native_sparse_attention_chunk_007.pdf: page 25

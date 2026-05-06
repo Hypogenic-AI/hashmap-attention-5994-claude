@@ -1,0 +1,30 @@
+\section{Introduction}
+\label{sec:intro}
+
+Attention is the bottleneck of long-context inference. The dot-product softmax is $O(L^2)$ in compute and $O(L)$ in memory at sequence length $L$, and production decoder stacks pay this twice: once at prefill, where every query attends to every key, and again at decode, where each new token reads the entire \kvcache. As frontier models stretch toward 100K and 1M token contexts, both costs become dominant.
+
+A natural way to cut the cost is to reuse prior attention behavior instead of recomputing it. A large body of work hashes the \emph{current query} embedding against \emph{current keys} \citep{kitaev2020reformer,daras2020smyrf,liu2024hashevict,chen2024magicpig}, ranks keys by accumulated attention \citep{zhang2023h2o,xiao2023streamingllm}, or builds approximate nearest-neighbor indexes over keys \citep{liu2024retrievalattention}. {\bf What none of these methods do is store the attention pattern of a token across occurrences.} If the word ``Paris'' attended to positions $\{12, 47, 88\}$ at one occurrence, that information is discarded; the next occurrence of ``Paris'' must rebuild its sparse pattern from scratch. The same gap exists for adaptive \kvcache quantization: published methods such as \kivi \citep{liu2024kivi} and \kvquant \citep{hooper2024kvquant} use static per-channel or per-token policies, never letting observed attention frequency drive bit-width allocation.
+
+\para{Our proposal.} We introduce \ours (\hma), a per-(layer, head, token-id) lookup table that records key positions where previous occurrences of a token attended above a threshold $\tau$ during prefill. At decode, the candidate-key set for a query token $t$ is the union of (i) attention sinks, (ii) a small sliding window, and (iii) stored positions retrieved from the table by token-id (\hmaid) or by an n-gram context hash (\hmang). The lookup is $O(1)$ per query, requires no training, and applies to any pretrained transformer. Critically, we also use the same table's per-position \emph{hit count} to drive adaptive \kvcache quantization, assigning more bits to frequently-attended positions and fewer to the rest at matched memory budget.
+
+\para{Why this could work, and why it might not.} Token identity is a coarse but available signal: the same word in similar contexts plausibly attends to similar pieces of context, and the n-gram extension lets neighbors with small edit distance share patterns. The risk is that real attention is too query-conditioned for an identity index to capture, and that sliding-window baselines already cover the local structure that token identity might add.
+
+\para{What we find.}
+We evaluate \hma on synthetic Q/K stress tests with planted token-conditioned structure, on \gpttwo-small with \wikitext, and on a synthetic aggregation probe in the style of \ruler-cwe. The picture is mixed but informative:
+\begin{itemize}[leftmargin=*,itemsep=0pt,topsep=0pt]
+    \item On data with token-conditioned attention, the primitive works cleanly: \hma achieves $98\times$ lower attention output relative error than random selection at matched budget (paired $t$-test $p<10^{-4}$).
+    \item On \gpttwo-small, same-token Jaccard overlap of top-16 attended positions is 0.09--0.18 across layers versus 0.02--0.07 for distinct-token pairs, a $1.8{-}5\times$ lift; 2-gram lookup overtakes identity at deeper layers.
+    \item At decode budget $\approx 25$, \hmaid reaches \ppl 90.6 versus \streaming's 95.7 at budget 32 (\ie similar quality with $22\%$ smaller effective \kvcache), and beats \randomb (\ppl 2972) and a windowless \hto (\ppl 399) by orders of magnitude.
+    \item On a common-word aggregation probe, \hma's candidate set scales with target frequency ($13 \to 41$ candidates as frequency goes $1 \to 64$), keeping relative error $\leq 0.013$. Threshold-based storage avoids the Top-K bias that LSH-Top-K methods exhibit \citep{chen2024magicpig}.
+    \item Adaptive \kvcache quantization driven by \hma hit count beats uniform 4-bit at lower memory (\ppl 26.4 at 3.9 bits versus 27.3 at 4.0 bits).
+\end{itemize}
+
+\para{Contributions.}
+\begin{itemize}[leftmargin=*,itemsep=0pt,topsep=0pt]
+    \item We propose \ours (\hma), the first attention shortcut that caches per-(token-id) attention patterns from prefill for reuse across occurrences, and an n-gram fuzzy variant.
+    \item We introduce \hmaquant, an adaptive \kvcache quantization policy that allocates bits by observed attention frequency, achieving a Pareto improvement over uniform low-bit quantization at matched memory.
+    \item We empirically characterize where \hma helps (small budgets, aggregation tasks, adaptive quantization signal) and where it does not (against well-tuned sliding-window baselines at moderate budgets), with five experiments and a documented aggregation-failure-mode probe.
+    \item We position \hma in the LSH-attention literature, showing it sidesteps the Top-K aggregation failure documented by \magicpig while remaining a training-free, post-hoc primitive.
+\end{itemize}
+
+\para{Paper organization.} \secref{sec:related} reviews sparse attention and \kvcache compression. \secref{sec:method} formalizes the \hma primitive and the adaptive quantization policy. \secref{sec:results} reports the five experiments. \secref{sec:discussion} discusses limitations and the gap between synthetic and real-LM behavior. \secref{sec:conclusion} concludes.

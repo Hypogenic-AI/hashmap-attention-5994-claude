@@ -1,0 +1,69 @@
+\section{Methodology}
+\label{sec:method}
+
+\subsection{The HashMap Attention primitive}
+\label{sec:method:hma}
+
+\para{Setup.} Consider a transformer with $L$ layers and $H$ heads per layer. Let $T$ be the input token sequence with token ids $t_1, \dots, t_L$ from vocabulary $\gV$. For each layer $\ell$ and head $h$, denote the per-position queries, keys, values by $\vq_i^{(\ell, h)}, \vk_i^{(\ell, h)}, \vv_i^{(\ell, h)} \in \R^{d}$. Standard causal attention computes
+\begin{equation}
+o_i^{(\ell, h)} = \sum_{j \leq i} \softmax_j\left( \vq_i^\top \vk_j / \sqrt{d} \right) \vv_j .
+\end{equation}
+
+\para{Lookup table.} For each (layer, head, token-id) triple $(\ell, h, v)$ with $v \in \gV$, \hma maintains a set of stored key positions
+\begin{equation}
+\gH^{(\ell, h)}[v] \subseteq \{1, \dots, L\}.
+\end{equation}
+During prefill, after computing full attention weights $a_{ij}^{(\ell, h)} = \softmax_j(\vq_i \vk_j^\top / \sqrt{d})$, we update
+\begin{equation}
+\gH^{(\ell, h)}[t_i] \leftarrow \gH^{(\ell, h)}[t_i] \cup \{j : a_{ij}^{(\ell, h)} \geq \tau \},
+\end{equation}
+where $\tau$ is a global storage threshold. We also maintain a \emph{hit count}
+\begin{equation}
+c_j^{(\ell, h)} = \#\{ i : a_{ij}^{(\ell, h)} \geq \tau \}
+\end{equation}
+that the adaptive quantization policy of \secref{sec:method:quant} uses.
+
+\para{Decode candidate set.} For a new query at position $i$ with token id $t_i$, the \hma candidate set for layer $\ell$ head $h$ is
+\begin{equation}
+\gC_i^{(\ell, h)} \;=\; \mathrm{Sinks} \;\cup\; \mathrm{Window}_i(w) \;\cup\; \mathrm{trim}\big(\gH^{(\ell, h)}[t_i] \cap \{1, \dots, i\},\, b\big),
+\end{equation}
+where $\mathrm{Sinks} = \{1, 2, 3, 4\}$ is a fixed set of four attention sinks following \streaming, $\mathrm{Window}_i(w) = \{i - w + 1, \dots, i\}$ is a sliding window of size $w = b/2$, and $\mathrm{trim}(\cdot, b)$ caps the candidate count at $b$ (taking the most-recent stored positions if needed). Attention is then computed only on $\gC_i^{(\ell, h)}$.
+
+\para{Fuzzy n-gram variant (\hmang).} The identity variant uses $t_i$ as the lookup key. The 2-gram variant uses the hash of the last two tokens, $\mathrm{hash}(t_{i-1}, t_i)$, allowing positions that share the same context bigram to share patterns. Higher $n$ generalizes naturally and trades coverage for specificity.
+
+\para{Algorithmic complexity.} Each lookup is $O(1)$ in a Python dict; the candidate set has size $|\gC_i| = O(|\mathrm{Sinks}| + w + |\gH[t_i]|)$, with the cap $b$ as an upper bound. In practice the threshold-based stored set is naturally sparse; we observe that even with cap $b = 256$, mean $|\gC_i| \approx 140$ on \wikitext, indicating sublinear growth.
+
+\subsection{Adaptive KV quantization (\hmaquant)}
+\label{sec:method:quant}
+
+We use the per-position hit count $c_j^{(\ell, h)}$ collected during a full-attention prefill pass to drive bit-width assignment. For each (layer, head), we rank positions by hit count and assign:
+\begin{itemize}[leftmargin=*,itemsep=0pt,topsep=0pt]
+    \item top $p_8$ fraction $\to$ 8-bit quantization,
+    \item next $p_4$ fraction $\to$ 4-bit,
+    \item rest $\to$ 3-bit (or whatever lowest tier is configured).
+\end{itemize}
+The average bits per value is $\bar{b} = 8 p_8 + 4 p_4 + 3 (1 - p_8 - p_4)$. We use symmetric quantization, per-channel for K (\kivi style) and per-token for V; mixed bit-widths are handled by quantizing each tier separately with its own scale.
+
+The control comparisons are \emph{uniform quantization} (every position the same bit-width) and \emph{random allocation} (same fractions $p_8, p_4$ but assigned to random positions). Random allocation matches memory exactly while removing the hit-count signal; if hit count is informative, adaptive should beat random at matched $\bar{b}$.
+
+\subsection{Experimental setup}
+\label{sec:method:setup}
+
+\para{Models and data.} Most experiments use \gpttwo-small (12 layers, 12 heads, $d_h = 64$, 124M parameters) loaded via HuggingFace \texttt{transformers} 5.8 with \texttt{attn\_implementation="eager"} so we can intercept softmax-time attention. The text data is \wikitext validation (locally cached at \texttt{datasets/wikitext-2/}). Synthetic stress and aggregation probes use planted Q/K matrices in pure PyTorch.
+
+\para{Why \gpttwo-small.} The model is open weights, fits comfortably on a single GPU, and is small enough to monkey-patch the attention forward pass and capture all $(L, H, i, j)$ scores in one pass for $L = 1024$. Attention behavior is qualitatively similar to larger models for short-to-medium contexts, so the primitive's qualitative behavior should generalize; we discuss scale limitations in \secref{sec:discussion}.
+
+\para{Baselines.} We compare \hmaid and \hmang to:
+\begin{itemize}[leftmargin=*,itemsep=0pt,topsep=0pt]
+    \item \full --- standard causal attention (oracle ceiling).
+    \item \streaming$(w)$ --- 4 attention sinks plus sliding window of size $w$ \citep{xiao2023streamingllm}.
+    \item \randomb$(b)$ --- $b$ random positions chosen uniformly per query (with sinks and current).
+    \item \hto$(b)$ --- top-$b$ positions by prefill-accumulated attention score per (layer, head) \citep{zhang2023h2o}, intentionally without a sliding-window component to isolate the heavy-hitter signal.
+\end{itemize}
+For adaptive quantization, the controls are uniform $\{2, 3, 4, 6, 8\}$-bit and random allocation at matched fractions.
+
+\para{Metrics.} We report (i) attention output relative error $\|\hat{\vo} - \vo\|_2 / \|\vo\|_2$ for synthetic stress; (ii) Jaccard overlap of top-16 attended positions for the pattern-stability study; (iii) \wikitext perplexity for end-to-end LM quality; (iv) effective decode budget = mean $|\gC_i|$; (v) relative error on a synthetic common-word counting probe; (vi) average bits per \kvcache value for quantization. We use seeds $\{0, 1, 2, 3, 4\}$ for synthetic and aggregation experiments and report mean $\pm$ std; \wikitext evaluation is deterministic and uses a single 1024-token passage.
+
+\para{Hyperparameters.} The default storage threshold is $\tau = 0.02$. The default candidate cap matches the budget $b$ specified in each experiment. Sinks are fixed at the first 4 positions; window is $w = b/2$.
+
+\para{Reproducibility.} All seeds are set (\texttt{random}, \texttt{numpy}, \texttt{torch}). All sources are in \texttt{src/}; each experiment script is self-contained and saves both JSON results and a figure. Total runtime on a single A6000 is approximately 4 minutes for all five experiments.

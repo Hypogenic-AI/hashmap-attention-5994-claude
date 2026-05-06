@@ -1,0 +1,13 @@
+PDF: papers/smyrf_asymmetric_clustering.pdf
+Total pages: 30
+Pages per chunk: 4
+
+Chunks:
+  smyrf_asymmetric_clustering_chunk_001.pdf: pages 1-4
+  smyrf_asymmetric_clustering_chunk_002.pdf: pages 5-8
+  smyrf_asymmetric_clustering_chunk_003.pdf: pages 9-12
+  smyrf_asymmetric_clustering_chunk_004.pdf: pages 13-16
+  smyrf_asymmetric_clustering_chunk_005.pdf: pages 17-20
+  smyrf_asymmetric_clustering_chunk_006.pdf: pages 21-24
+  smyrf_asymmetric_clustering_chunk_007.pdf: pages 25-28
+  smyrf_asymmetric_clustering_chunk_008.pdf: pages 29-30

@@ -1,0 +1,34 @@
+Resource finding phase completed successfully.
+Timestamp: 2026-05-06T18:10:00Z
+Project: HashMap Attention
+Papers downloaded: 34 PDFs (138 MB)
+Datasets downloaded: 1 (WikiText-2, 7.8 MB; 9 more documented for download)
+Repositories cloned: 12 (594 MB)
+
+Deliverables:
+- papers/             34 PDFs covering LSH attention, KV-cache sparsity, KV
+                      quantization, and foundational attention work
+- papers/README.md    paper-by-paper guide with reading priority
+- datasets/           WikiText-2 ready to load via load_from_disk
+- datasets/README.md  download instructions for 9 additional benchmarks
+                      (WikiText-103, PG19, LongBench, RULER, NIAH, etc.)
+- code/               12 cloned repositories (MagicPIG, HashEvict-via-Cold-Compress,
+                      Quest, RetrievalAttention, SMYRF, H2O, StreamingLLM,
+                      KIVI, KVQuant, Multipole, FlashAttention, Reformer-PyTorch)
+- code/README.md      per-repo installation + integration notes
+- literature_review.md ~600-line synthesis of the field with explicit
+                      recommendations for the experiment runner
+- resources.md        catalog of all resources
+
+Key takeaways for the experiment runner:
+1. Closest prior art is MagicPIG (LSH sampling) and HashEvict (LSH eviction).
+   Cold-Compress is the recommended integration point because HashEvict was
+   released as a fork of it.
+2. The single most important benchmark is RULER's cwe/fwe (aggregation tasks);
+   prior LSH-TopK methods fail there even though they pass NIAH.
+3. RetrievalAttention identifies an OOD problem between Q and K distributions
+   that breaks naive ANN/LSH; SMYRF's asymmetric LSH is the canonical fix.
+4. NSA (DeepSeek 2025) calls out non-differentiability of hard hashing as a
+   training-time blocker; design accordingly.
+5. The "adaptive KV quantization" half of the hypothesis pairs naturally with
+   KIVI's per-channel-K / per-token-V scheme.

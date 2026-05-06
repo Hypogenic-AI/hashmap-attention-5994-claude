@@ -1,0 +1,27 @@
+{
+  "success": true,
+  "stages": {
+    "resource_finder": {
+      "success": true,
+      "completion_marker": "/workspaces/hashmap-attention-5994-claude/.resource_finder_complete",
+      "outputs": {
+        "literature_review": "/workspaces/hashmap-attention-5994-claude/literature_review.md",
+        "resources_catalog": "/workspaces/hashmap-attention-5994-claude/resources.md",
+        "papers_dir": "/workspaces/hashmap-attention-5994-claude/papers",
+        "datasets_dir": "/workspaces/hashmap-attention-5994-claude/datasets",
+        "code_dir": "/workspaces/hashmap-attention-5994-claude/code"
+      },
+      "log_file": "/workspaces/hashmap-attention-5994-claude/logs/resource_finder_claude.log",
+      "transcript_file": "/workspaces/hashmap-attention-5994-claude/logs/resource_finder_claude_transcript.jsonl",
+      "elapsed_time": 1340.6910543441772
+    },
+    "experiment_runner": {
+      "success": true,
+      "return_code": 0,
+      "elapsed_time": 1497.6547195911407,
+      "log_file": "/workspaces/hashmap-attention-5994-claude/logs/execution_claude.log",
+      "transcript_file": "/workspaces/hashmap-attention-5994-claude/logs/execution_claude_transcript.jsonl"
+    }
+  },
+  "work_dir": "/workspaces/hashmap-attention-5994-claude"
+}

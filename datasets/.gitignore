@@ -1,0 +1,9 @@
+# Exclude large dataset files from git
+*
+
+# But keep documentation and download instructions
+!.gitignore
+!README.md
+!**/README.md
+!**/download.sh
+!**/sample_*.json

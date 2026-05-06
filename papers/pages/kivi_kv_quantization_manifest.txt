@@ -1,0 +1,9 @@
+PDF: papers/kivi_kv_quantization.pdf
+Total pages: 15
+Pages per chunk: 4
+
+Chunks:
+  kivi_kv_quantization_chunk_001.pdf: pages 1-4
+  kivi_kv_quantization_chunk_002.pdf: pages 5-8
+  kivi_kv_quantization_chunk_003.pdf: pages 9-12
+  kivi_kv_quantization_chunk_004.pdf: pages 13-15

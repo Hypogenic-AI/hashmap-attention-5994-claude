@@ -1,0 +1,41 @@
+\section{Discussion}
+\label{sec:discussion}
+
+\subsection{Interpretation}
+
+The five experiments paint a coherent picture. The \hma primitive is well-defined and captures planted token-conditioned structure cleanly ($98\times$ lower error than random, \secref{sec:results:synth}). Real-LM attention does exhibit a token-identity signal, but it is modest: same-token Jaccard overlap is $1.8{-}5\times$ above the distinct-pair baseline, with absolute values 0.09--0.18 (\secref{sec:results:stability}). At small \kvcache budgets this signal translates to a measurable perplexity advantage: \hmaid reaches \ppl 90.6 at effective budget 24.8 versus \streaming's 95.7 at budget 32 (\secref{sec:results:ppl}). At larger budgets, however, \streaming and \hma converge --- a well-tuned sliding window plus sinks already covers most of the structure that token identity would add at this scale.
+
+The clearer wins are on (i) the aggregation probe, where threshold-based storage avoids the Top-K collapse documented by \magicpig (\secref{sec:results:agg}), and (ii) adaptive \kvcache quantization, where hit-count-driven bit allocation Pareto-dominates uniform 4-bit (\secref{sec:results:quant}).
+
+\para{Surprises.} Three findings bear underlining. First, 2-gram lookup overtakes identity at deeper layers, consistent with the view that early layers do token-level processing while deeper layers integrate context --- automatic per-layer choice of n-gram length is the obvious next refinement. Second, \hma's effective budget saturates well below the cap (e.g.\ 133 with cap 256), suggesting attention is genuinely sparse beyond a few tokens and the cap is mostly redundant for \hma. Third, windowless \hto is dramatically worse than expected (\ppl 399 at $b = 32$), implying that published \hto numbers depend critically on the sliding-window component being stacked on top.
+
+\para{Quantization headroom.} Uniform 6-bit \kvcache quantization on \gpttwo is essentially lossless. Adaptive allocation only helps in the 3--4 bit regime where uniform breaks down. Larger models with longer context have more outliers in K \citep{hooper2024kvquant}, so adaptive bit allocation has more headroom there; we expect the adaptive-vs-uniform gap to grow with scale.
+
+\subsection{Limitations}
+
+\para{Methodological.}
+\begin{itemize}[leftmargin=*,itemsep=0pt,topsep=0pt]
+    \item \emph{Small model.} \gpttwo-small has $d_h = 64$, much smaller than frontier LLMs. Larger models typically have sparser attention, which would generally favor \hma. We did not test on Llama-1B or larger.
+    \item \emph{Short context.} $L \leq 1024$ in our evaluation. The biggest claimed wins of sparse attention come at $L \geq 32K$. Long-context evaluation may sharpen the differentiation between \hma and \streaming.
+    \item \emph{Single passage for LM perplexity.} A per-method perplexity distribution across multiple passages would be statistically tighter; synthetic and aggregation experiments use 5 seeds.
+    \item \emph{Mask-based eval, not actual sparse compute.} We measure quality, not wall-clock. A CUDA/Triton kernel for \hma candidate gather would be needed for an honest speed claim, and we expect the systems engineering to be substantial.
+    \item \emph{\hto baseline is bare-bones.} Our \hto omits a sliding-window component to isolate the heavy-hitter signal. The numbers reported here are intentionally pessimistic for \hto and should not be read as a refutation of the published method.
+    \item \emph{Quantization comparison is stylized.} Our uniform baseline uses per-channel K and per-token V scales (\kivi-style) but is not a full \kivi reproduction. Mixed-precision K-quantization is approximated by per-tier per-channel scales.
+\end{itemize}
+
+\para{Threats to validity.}
+\begin{itemize}[leftmargin=*,itemsep=0pt,topsep=0pt]
+    \item \emph{Internal validity.} \hma constructs its lookup table from the prefill oracle. In a true post-hoc deployment, prefill happens at full cost; what \hma buys is a cheaper decode. \secref{sec:results:ppl} measures decode-region NLL with full-attention prefill, which is consistent with that deployment.
+    \item \emph{External validity.} We tested on \wikitext (English Wikipedia). Domains with different attention patterns (code, math, RAG) may behave differently.
+    \item \emph{Ceiling effects.} \gpttwo's \kvcache is remarkably robust to uniform 6-bit quantization, leaving little headroom for adaptive allocation; the modest adaptive win we observe may grow at scale.
+\end{itemize}
+
+\para{What could invalidate the results.} A bug in mask-injection would systematically miscalibrate logits; mitigated by checking that the full-mask forward exactly reproduces the oracle \ppl. A bug in \hma candidate-set construction artificially favoring \hma; mitigated by reporting effective budget (often \emph{smaller} than baselines') and including \randomb and \hto controls. The adaptive-quantization win at 3.9 bits being noise; the random-control comparison (\ppl 26.41 vs.\ 27.12) suggests the signal is real, though small.
+
+\subsection{Broader implications}
+
+\para{Where \hma is most useful.} The most defensible product of this work is \hma as a \emph{signal} for downstream decisions --- adaptive bit allocation, cache eviction priority, page-importance scoring --- rather than as a primary candidate-set selector. Sliding window plus sinks is a strong baseline that is hard to beat at small models and short contexts; \hma's wins are at the smallest budgets and on aggregation tasks.
+
+\para{Connection to retrieval-augmented modeling.} \hma's index keyed by token identity has a flavor reminiscent of retrieval-augmented LMs that keep external token-indexed memories. Unlike retrieval-augmented LMs, \hma operates at the attention-pattern level and does not require text or embedding retrieval at inference. Bridging the two --- treating the lookup as a learned, queryable pattern bank --- is a natural future direction.
+
+\para{Trainability.} Hard threshold gating is non-differentiable, blocking gradient flow as \nsa \citep{deepseek2025nsa} flagged. A learned, soft variant of the gate (\eg sigmoid with straight-through estimator) is needed to make \hma trainable. We did not pursue this here.

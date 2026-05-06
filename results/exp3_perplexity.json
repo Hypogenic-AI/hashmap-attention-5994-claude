@@ -1,0 +1,190 @@
+{
+  "L": 512,
+  "decode_start": 256,
+  "nll_full": 3.1104423999786377,
+  "ppl_full": 22.430965664731943,
+  "runs": [
+    {
+      "method": "full",
+      "budget_target": 512,
+      "nll": 3.1104423999786377,
+      "ppl": 22.430965664731943,
+      "mean_budget_decode": 384.5
+    },
+    {
+      "method": "streaming",
+      "budget_target": 16,
+      "nll": 5.331940174102783,
+      "ppl": 206.83888856371,
+      "mean_budget_decode": 16.0
+    },
+    {
+      "method": "random",
+      "budget_target": 16,
+      "nll": 8.424781799316406,
+      "ppl": 4558.649969328423,
+      "mean_budget_decode": 16.0
+    },
+    {
+      "method": "h2o",
+      "budget_target": 16,
+      "nll": 6.804866313934326,
+      "ppl": 902.2271466681451,
+      "mean_budget_decode": 16.0
+    },
+    {
+      "method": "hma_identity",
+      "budget_target": 16,
+      "nll": 5.332018852233887,
+      "ppl": 206.85516290111053,
+      "mean_budget_decode": 13.956678946812948
+    },
+    {
+      "method": "hma_2gram",
+      "budget_target": 16,
+      "nll": 5.762587070465088,
+      "ppl": 318.17039431879607,
+      "mean_budget_decode": 12.57419196764628
+    },
+    {
+      "method": "streaming",
+      "budget_target": 32,
+      "nll": 4.561046600341797,
+      "ppl": 95.68356990074133,
+      "mean_budget_decode": 32.0
+    },
+    {
+      "method": "random",
+      "budget_target": 32,
+      "nll": 7.997048854827881,
+      "ppl": 2972.1737154756643,
+      "mean_budget_decode": 32.0
+    },
+    {
+      "method": "h2o",
+      "budget_target": 32,
+      "nll": 5.989419460296631,
+      "ppl": 399.1828011815421,
+      "mean_budget_decode": 32.0
+    },
+    {
+      "method": "hma_identity",
+      "budget_target": 32,
+      "nll": 4.506946563720703,
+      "ppl": 90.64461795380076,
+      "mean_budget_decode": 24.82478888829549
+    },
+    {
+      "method": "hma_2gram",
+      "budget_target": 32,
+      "nll": 4.799556255340576,
+      "ppl": 121.45650988139424,
+      "mean_budget_decode": 21.156765937805176
+    },
+    {
+      "method": "streaming",
+      "budget_target": 64,
+      "nll": 3.994535207748413,
+      "ppl": 54.30059626117652,
+      "mean_budget_decode": 64.0
+    },
+    {
+      "method": "random",
+      "budget_target": 64,
+      "nll": 7.184553623199463,
+      "ppl": 1318.900380328114,
+      "mean_budget_decode": 64.0
+    },
+    {
+      "method": "h2o",
+      "budget_target": 64,
+      "nll": 5.930178165435791,
+      "ppl": 376.22153752809595,
+      "mean_budget_decode": 64.0
+    },
+    {
+      "method": "hma_identity",
+      "budget_target": 64,
+      "nll": 4.0938496589660645,
+      "ppl": 59.9703131513028,
+      "mean_budget_decode": 44.19588311513265
+    },
+    {
+      "method": "hma_2gram",
+      "budget_target": 64,
+      "nll": 4.271785259246826,
+      "ppl": 71.64943432352305,
+      "mean_budget_decode": 37.33157157897949
+    },
+    {
+      "method": "streaming",
+      "budget_target": 128,
+      "nll": 3.776451349258423,
+      "ppl": 43.660829466524184,
+      "mean_budget_decode": 128.0
+    },
+    {
+      "method": "random",
+      "budget_target": 128,
+      "nll": 5.7054901123046875,
+      "ppl": 300.51272894757886,
+      "mean_budget_decode": 128.0
+    },
+    {
+      "method": "h2o",
+      "budget_target": 128,
+      "nll": 6.105158805847168,
+      "ppl": 448.1638068375075,
+      "mean_budget_decode": 128.0
+    },
+    {
+      "method": "hma_identity",
+      "budget_target": 128,
+      "nll": 3.893333673477173,
+      "ppl": 49.07421153375039,
+      "mean_budget_decode": 79.06508000691731
+    },
+    {
+      "method": "hma_2gram",
+      "budget_target": 128,
+      "nll": 3.8246145248413086,
+      "ppl": 45.81513636507455,
+      "mean_budget_decode": 69.30563926696777
+    },
+    {
+      "method": "streaming",
+      "budget_target": 256,
+      "nll": 3.4092893600463867,
+      "ppl": 30.24374420792609,
+      "mean_budget_decode": 256.0
+    },
+    {
+      "method": "random",
+      "budget_target": 256,
+      "nll": 4.070223331451416,
+      "ppl": 58.570041663768215,
+      "mean_budget_decode": 256.0
+    },
+    {
+      "method": "h2o",
+      "budget_target": 256,
+      "nll": 6.271421909332275,
+      "ppl": 529.229359291185,
+      "mean_budget_decode": 256.0
+    },
+    {
+      "method": "hma_identity",
+      "budget_target": 256,
+      "nll": 3.6680803298950195,
+      "ppl": 39.17662742805652,
+      "mean_budget_decode": 143.41073099772134
+    },
+    {
+      "method": "hma_2gram",
+      "budget_target": 256,
+      "nll": 3.627203941345215,
+      "ppl": 37.60751665092638,
+      "mean_budget_decode": 133.24645233154297
+    }
+  ]
+}

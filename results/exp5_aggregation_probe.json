@@ -1,0 +1,60 @@
+{
+  "config": {
+    "seq_len": 512,
+    "threshold": 0.005,
+    "n_heads": 4,
+    "d_head": 32,
+    "vocab_size": 100
+  },
+  "results": [
+    {
+      "target_freq": 1,
+      "mean_target_count": 2.0,
+      "mean_candidate_size": 13.0,
+      "mean_rel_error": 0.0030736056470914265,
+      "std_rel_error": 0.0034504553570511294
+    },
+    {
+      "target_freq": 2,
+      "mean_target_count": 2.8,
+      "mean_candidate_size": 13.6,
+      "mean_rel_error": 0.0013123006499455414,
+      "std_rel_error": 0.0009670866539133217
+    },
+    {
+      "target_freq": 4,
+      "mean_target_count": 4.8,
+      "mean_candidate_size": 15.6,
+      "mean_rel_error": 0.0011320078277293534,
+      "std_rel_error": 0.0008753200092027224
+    },
+    {
+      "target_freq": 8,
+      "mean_target_count": 8.6,
+      "mean_candidate_size": 18.6,
+      "mean_rel_error": 0.001258167060922233,
+      "std_rel_error": 0.0010562028072100924
+    },
+    {
+      "target_freq": 16,
+      "mean_target_count": 15.6,
+      "mean_candidate_size": 23.8,
+      "mean_rel_error": 0.003223302457263344,
+      "std_rel_error": 0.0005992623524823265
+    },
+    {
+      "target_freq": 32,
+      "mean_target_count": 28.2,
+      "mean_candidate_size": 32.4,
+      "mean_rel_error": 0.007279772264882922,
+      "std_rel_error": 0.0014587602704511059
+    },
+    {
+      "target_freq": 64,
+      "mean_target_count": 43.0,
+      "mean_candidate_size": 40.8,
+      "mean_rel_error": 0.012959460215643048,
+      "std_rel_error": 0.002333192170553713
+    }
+  ]
+}
