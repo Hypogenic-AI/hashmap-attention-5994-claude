@@ -1,0 +1,31 @@
+idea:
+  title: HashMap Attention
+  domain: artificial_intelligence
+  hypothesis: 'Building a lookup table of attention scores during prefill and updating
+    it during decode enables subquadratic attention scaling by performing fuzzy lookups
+    and only computing attention scores against keys where previous instances of the
+    token (or similar token sequences) attended above a threshold. This approach may
+    also enable adaptive KV cache quantization, though achieving sufficient speed
+    for frontier-scale models presents significant systems challenges.
+
+    '
+  background:
+    description: "Build a lookup table of attention scores during prefill/keep adding\
+      \ to it during decode. Attention scales subquadratially by doing fuzzy lookups\
+      \ and only computing attention scores against keys where previous instances\
+      \ of the token (or small edit distance token sequences) attended with some threshold\
+      \ value. Could try to use this for an adaptive KV cache quantization too. The\
+      \ systems side of getting this fast enough to be viable at the frontier would\
+      \ be a huge headache though. Unless you\u2019re only doing this for adaptive\
+      \ quantization, you\u2019ll want the dictionary in accelerator memory which\
+      \ isn\u2019t really made for these type of ops. Maybe some cleverness with sparse\
+      \ matrix ops\n"
+  metadata:
+    author: Mark Muchane
+    source: IdeaHub
+    source_url: https://hypogenic.ai/ideahub/idea/UYtNyuXwKF3BsFthG9Vx
+    idea_id: hashmap_attention_20260506_174740_5f35ac86
+    created_at: '2026-05-06T17:47:40.769534'
+    status: submitted
+    github_repo_name: hashmap-attention-5994-claude
+    github_repo_url: https://github.com/Hypogenic-AI/hashmap-attention-5994-claude
